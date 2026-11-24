@@ -17,6 +17,7 @@ import static org.awaitility.Awaitility.await;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import io.github.yuvrajtiwary.earlybird.alerts.DigestService;
+import io.github.yuvrajtiwary.earlybird.alerts.Notifier;
 import io.github.yuvrajtiwary.earlybird.common.Base62;
 import io.github.yuvrajtiwary.earlybird.enrich.TaggingWorker;
 import io.github.yuvrajtiwary.earlybird.persistence.Alert;
@@ -38,8 +39,14 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -64,6 +71,7 @@ class PipelineIT {
     @Autowired TaggingWorker tagging;
     @Autowired Matcher matcher;
     @Autowired DigestService digest;
+    @Autowired Notifier notifier;
     @Autowired AlertRepository alerts;
     @Autowired UserRepository users;
     @Autowired ProfileRepository profiles;
@@ -144,6 +152,45 @@ class PipelineIT {
         tap(keen, "fb:r:" + Base62.encode(sent.id()));
 
         await().untilAsserted(() -> assertThat(alert(keen, postingId).feedback()).isEqualTo(Alert.Feedback.RELEVANT));
+    }
+
+    /**
+     * At-least-once delivery means the same AlertRequested can arrive more than once, even at the same moment on
+     * different consumers. The alert must still reach the user exactly once and count once against the daily cap.
+     */
+    @Test
+    void anAlertDeliveredManyTimesAtOnceIsSentOnce() throws Exception {
+        User user = activeUser(95);   // routed to the digest, so nothing has been sent yet
+        Board board = boardWithBaseline();
+        UUID postingId = newJob(board, "401", "Backend Engineer (Java)");
+        tagging.drain();
+        Alert queued = awaitAlert(user, postingId, Alert.Status.QUEUED);
+        jdbc.sql("update alerts set mode = 'instant' where id = :id").param("id", queued.id()).update();
+
+        int copies = 8;
+        List<Alert.Status> outcomes = new ArrayList<>();
+        try (ExecutorService pool = Executors.newFixedThreadPool(copies)) {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Alert.Status>> futures = new ArrayList<>();
+            for (int i = 0; i < copies; i++) {
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    return notifier.deliver(queued.id(), false);
+                }));
+            }
+            start.countDown();
+            for (Future<Alert.Status> f : futures) {
+                outcomes.add(f.get(20, TimeUnit.SECONDS));
+            }
+        }
+
+        // Copies that lost the claim say SENDING, or SENT if they looked after the winner finished.
+        assertThat(outcomes).contains(Alert.Status.SENT).containsOnly(Alert.Status.SENT, Alert.Status.SENDING);
+        assertThat(alert(user, postingId).status()).isEqualTo(Alert.Status.SENT);
+        assertThat(messagesTo(user)).hasSize(1);   // the guarantee: one message, however many copies
+        // A late copy, after the send, changes nothing either.
+        assertThat(notifier.deliver(queued.id(), false)).isEqualTo(Alert.Status.SENT);
+        assertThat(messagesTo(user)).hasSize(1);
     }
 
     // ------------------------------------------------------------------------------------------ helpers

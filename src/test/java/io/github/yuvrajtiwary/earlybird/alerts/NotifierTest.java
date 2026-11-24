@@ -2,9 +2,11 @@ package io.github.yuvrajtiwary.earlybird.alerts;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -83,6 +85,9 @@ class NotifierTest {
 
         notifier.deliver(id, false);
         verify(telegram, never()).sendMessage(anyLong(), anyString(), any());
+        // A losing copy must not use up the daily cap or pull the winner's alert back into the digest.
+        verify(caps, never()).tryReserve(anyLong(), anyInt());
+        verify(alerts, never()).moveToDigest(any());
     }
 
     @Test
@@ -101,7 +106,10 @@ class NotifierTest {
         when(caps.tryReserve(anyLong(), eq(10))).thenReturn(false);
 
         notifier.deliver(id, false);
-        verify(alerts).moveToDigest(id);
+        var order = inOrder(alerts, caps);
+        order.verify(alerts).claimForSending(id); // only the copy that owns the alert moves it
+        order.verify(caps).tryReserve(anyLong(), eq(10));
+        order.verify(alerts).moveToDigest(id);
         verify(telegram, never()).sendMessage(anyLong(), anyString(), any());
     }
 

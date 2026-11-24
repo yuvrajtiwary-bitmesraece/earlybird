@@ -103,13 +103,15 @@ public class Notifier implements InitializingBean {
         if (d.closedAt() != null) {
             return finish(alertId, Alert.Status.CANCELLED, "posting_closed");
         }
+        // Claim before touching the cap. Copies of the same event that lose the claim must neither use up the
+        // user's daily cap nor move an alert that the winner is already sending back to the digest.
+        if (!alerts.claimForSending(alertId)) {
+            return Alert.Status.SENDING; // another delivery got there first
+        }
         if (alert.mode() == Alert.Mode.INSTANT && !caps.tryReserve(alert.userId(), d.dailyCap())) {
             alerts.moveToDigest(alertId);
             count("over_cap");
             return Alert.Status.QUEUED;
-        }
-        if (!alerts.claimForSending(alertId)) {
-            return Alert.Status.SENDING; // another delivery got there first
         }
         return send(d, recent);
     }
