@@ -49,7 +49,7 @@ class RepositoriesIT {
         var posting = new Posting(Ids.newId(), board.id(), board.source(), "ext-" + UUID.randomUUID(),
                 "https://boards.example.com/jobs/1", "Backend Engineer I", "ExampleCo", "Bengaluru, India",
                 List.of("Engineering", "Platform"), null, NOW, NOW, 0, null, "hash-1", "Build APIs in Java.",
-                false, null);
+                false, null, false);
         assertThat(postings.insertIfAbsent(posting)).isTrue();
         return posting;
     }
@@ -93,7 +93,7 @@ class RepositoriesIT {
 
         var sameJobNewId = new Posting(Ids.newId(), posting.boardId(), posting.source(), posting.externalId(),
                 posting.url(), posting.title(), posting.company(), posting.locationRaw(), posting.departments(),
-                null, NOW, NOW, 0, null, "hash-1", null, false, null);
+                null, NOW, NOW, 0, null, "hash-1", null, false, null, false);
         assertThat(postings.insertIfAbsent(sameJobNewId)).isFalse();
         assertThat(postings.findById(sameJobNewId.id())).isEmpty();
     }
