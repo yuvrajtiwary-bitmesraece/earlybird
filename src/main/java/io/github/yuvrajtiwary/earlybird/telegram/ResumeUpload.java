@@ -98,9 +98,10 @@ class ResumeUpload {
         }
 
         if (session.state() == State.ONBOARDING_RESUME) {
-            flows.finish(user, chatId);
+            flows.finish(user, chatId); // sends recent matches too
         } else {
             sessions.save(user.id(), Session.idle());
+            flows.sendRecentMatches(user); // new skills can mean new matches
         }
     }
 

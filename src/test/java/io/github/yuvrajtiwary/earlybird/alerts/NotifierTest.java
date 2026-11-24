@@ -1,0 +1,149 @@
+package io.github.yuvrajtiwary.earlybird.alerts;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import io.github.yuvrajtiwary.earlybird.common.Ids;
+import io.github.yuvrajtiwary.earlybird.common.TokenBucketRateLimiter;
+import io.github.yuvrajtiwary.earlybird.events.EventBus;
+import io.github.yuvrajtiwary.earlybird.ops.AdminNotifier;
+import io.github.yuvrajtiwary.earlybird.persistence.Alert;
+import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository;
+import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository.Delivery;
+import io.github.yuvrajtiwary.earlybird.persistence.User;
+import io.github.yuvrajtiwary.earlybird.persistence.UserRepository;
+import io.github.yuvrajtiwary.earlybird.telegram.api.Message;
+import io.github.yuvrajtiwary.earlybird.telegram.api.TelegramApi;
+import io.github.yuvrajtiwary.earlybird.telegram.api.TelegramException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+
+/** Every branch of a delivery (spec 3.10), with the database and Telegram faked. */
+class NotifierTest {
+
+    private final AlertRepository alerts = mock(AlertRepository.class);
+    private final UserRepository users = mock(UserRepository.class);
+    private final TelegramApi telegram = mock(TelegramApi.class);
+    private final DailyCaps caps = mock(DailyCaps.class);
+    private final AdminNotifier admin = mock(AdminNotifier.class);
+    private final Notifier notifier = new Notifier(alerts, users, telegram, new TokenBucketRateLimiter(Clock.systemUTC()),
+            caps, new AlertFormatter(""), mock(EventBus.class), admin, Clock.systemUTC(), new SimpleMeterRegistry(),
+            List.of(Duration.ZERO));
+
+    private final UUID id = Ids.newId();
+
+    private void given(Alert.Status status, User.Status userStatus, Instant closedAt) {
+        Alert alert = new Alert(id, 7, Ids.newId(), 80, List.of("Java"), List.of(), Alert.Mode.INSTANT, status,
+                Instant.now(), null, null, null, null);
+        when(alerts.findDelivery(id)).thenReturn(Optional.of(new Delivery(alert, 42, userStatus, 10, "Backend Engineer",
+                "Acme", "https://x", "Bengaluru", Instant.now(), closedAt, List.of(), "onsite", null, null, List.of("Java"))));
+        when(caps.tryReserve(anyLong(), eq(10))).thenReturn(true);
+        when(alerts.claimForSending(id)).thenReturn(true);
+    }
+
+    private static Message sent() {
+        return new Message(555, null, null, 1L, null, null);
+    }
+
+    @Test
+    void sendsAndRecordsTheTelegramMessage() {
+        given(Alert.Status.QUEUED, User.Status.ACTIVE, null);
+        when(telegram.sendMessage(eq(42L), anyString(), any())).thenReturn(sent());
+
+        assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.SENT);
+        verify(alerts).markSent(eq(id), any(), eq(555L));
+    }
+
+    @Test
+    void anAlertThatIsNoLongerQueuedIsNotSentAgain() {
+        given(Alert.Status.SENT, User.Status.ACTIVE, null);
+
+        assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.SENT);
+        verify(telegram, never()).sendMessage(anyLong(), anyString(), any());
+    }
+
+    @Test
+    void losingTheClaimMeansSomeoneElseIsSendingIt() {
+        given(Alert.Status.QUEUED, User.Status.ACTIVE, null);
+        when(alerts.claimForSending(id)).thenReturn(false);
+
+        notifier.deliver(id, false);
+        verify(telegram, never()).sendMessage(anyLong(), anyString(), any());
+    }
+
+    @Test
+    void pausedUsersAndClosedPostingsAreSkipped() {
+        given(Alert.Status.QUEUED, User.Status.PAUSED, null);
+        assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.SKIPPED);
+
+        given(Alert.Status.QUEUED, User.Status.ACTIVE, Instant.now());
+        assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.CANCELLED);
+        verify(telegram, never()).sendMessage(anyLong(), anyString(), any());
+    }
+
+    @Test
+    void overTheDailyCapItWaitsForTheDigest() {
+        given(Alert.Status.QUEUED, User.Status.ACTIVE, null);
+        when(caps.tryReserve(anyLong(), eq(10))).thenReturn(false);
+
+        notifier.deliver(id, false);
+        verify(alerts).moveToDigest(id);
+        verify(telegram, never()).sendMessage(anyLong(), anyString(), any());
+    }
+
+    @Test
+    void aUserWhoBlockedTheBotIsMarkedBlocked() {
+        given(Alert.Status.QUEUED, User.Status.ACTIVE, null);
+        when(telegram.sendMessage(eq(42L), anyString(), any()))
+                .thenThrow(new TelegramException(403, "Forbidden: bot was blocked by the user", null));
+
+        assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.FAILED);
+        verify(users).updateStatus(7, User.Status.BLOCKED);
+    }
+
+    @Test
+    void rateLimitsAndServerErrorsAreRetried() {
+        given(Alert.Status.QUEUED, User.Status.ACTIVE, null);
+        when(telegram.sendMessage(eq(42L), anyString(), any()))
+                .thenThrow(new TelegramException(429, "Too Many Requests", Duration.ofMillis(10)))
+                .thenThrow(new TelegramException(502, "Bad Gateway", null))
+                .thenReturn(sent());
+
+        assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.SENT);
+        verify(telegram, times(3)).sendMessage(eq(42L), anyString(), any());
+    }
+
+    @Test
+    void otherClientErrorsFailTheAlertAndTellTheAdmin() {
+        given(Alert.Status.QUEUED, User.Status.ACTIVE, null);
+        when(telegram.sendMessage(eq(42L), anyString(), any()))
+                .thenThrow(new TelegramException(400, "Bad Request: can't parse entities", null));
+
+        assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.FAILED);
+        verify(telegram, times(1)).sendMessage(eq(42L), anyString(), any());
+        verify(admin).notifyOncePerDay(eq("alert-rejected"), anyString());
+    }
+
+    @Test
+    void givesUpAfterThreeFailedAttempts() {
+        given(Alert.Status.QUEUED, User.Status.ACTIVE, null);
+        when(telegram.sendMessage(eq(42L), anyString(), any())).thenThrow(new TelegramException(0, "network error", null));
+
+        assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.FAILED);
+        verify(telegram, times(Notifier.MAX_ATTEMPTS)).sendMessage(eq(42L), anyString(), any());
+    }
+}

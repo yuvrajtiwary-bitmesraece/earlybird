@@ -1,7 +1,9 @@
 package io.github.yuvrajtiwary.earlybird.telegram;
 
+import io.github.yuvrajtiwary.earlybird.common.Base62;
 import io.github.yuvrajtiwary.earlybird.common.RateLimiter;
 import io.github.yuvrajtiwary.earlybird.common.RateLimiter.Bandwidth;
+import io.github.yuvrajtiwary.earlybird.persistence.Alert;
 import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.User;
 import io.github.yuvrajtiwary.earlybird.persistence.UserRepository;
@@ -18,6 +20,7 @@ import io.github.yuvrajtiwary.earlybird.telegram.api.Update;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -191,6 +194,10 @@ class Bot {
                 }
                 return;
             }
+            if (cq.data().startsWith("fb:")) {
+                toast = feedback(user, cq.data());
+                return;
+            }
             toast = flows.onCallback(user, cq);
         } finally {
             try {
@@ -199,6 +206,26 @@ class Bot {
                 log.debug("answerCallbackQuery failed: {}", e.getMessage()); // e.g. the tap is too old
             }
         }
+    }
+
+    /** 👍 / 👎 on an alert: {@code fb:r:<alert id in base62>} or {@code fb:n:...}. Stored for /stats. */
+    private String feedback(User user, String data) {
+        String[] parts = data.split(":");
+        if (parts.length != 3 || !(parts[1].equals("r") || parts[1].equals("n"))) {
+            return ProfileFlows.STALE;
+        }
+        UUID alertId;
+        try {
+            alertId = Base62.decode(parts[2]);
+        } catch (IllegalArgumentException e) {
+            return ProfileFlows.STALE;
+        }
+        boolean relevant = parts[1].equals("r");
+        if (!alerts.setFeedback(alertId, user.id(), relevant ? Alert.Feedback.RELEVANT : Alert.Feedback.NOT_RELEVANT,
+                clock.instant())) {
+            return "That alert is no longer available.";
+        }
+        return relevant ? "Thanks! Marked as relevant 👍" : "Thanks! That helps tune your matches.";
     }
 
     // ------------------------------------------------------------------------------------- helpers

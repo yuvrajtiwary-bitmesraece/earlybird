@@ -1,5 +1,6 @@
 package io.github.yuvrajtiwary.earlybird.telegram;
 
+import io.github.yuvrajtiwary.earlybird.matching.RecentMatches;
 import io.github.yuvrajtiwary.earlybird.persistence.Profile;
 import io.github.yuvrajtiwary.earlybird.persistence.RoleCategory;
 import io.github.yuvrajtiwary.earlybird.persistence.User;
@@ -24,11 +25,6 @@ import org.springframework.beans.factory.ObjectProvider;
  */
 class ProfileFlows {
 
-    /** Block 4 plugs the matcher in here: "up to 3 recent matches" right after onboarding. */
-    interface RecentMatches {
-        void sendTo(User user, long chatId);
-    }
-
     static final String STALE = "That menu is out of date.";
 
     private final TelegramApi api;
@@ -50,6 +46,14 @@ class ProfileFlows {
 
     static boolean onboarded(User user) {
         return user.consentAt() != null;
+    }
+
+    /**
+     * After onboarding or a change that affects matching: up to 3 matches from the last 48 h (the matcher role;
+     * absent in a bot-only process). They arrive as normal alerts, labelled "Recent match".
+     */
+    void sendRecentMatches(User user) {
+        recentMatches.ifAvailable(r -> r.sendTo(user.id()));
     }
 
     // ----------------------------------------------------------------------------------------- /start
@@ -137,6 +141,7 @@ class ProfileFlows {
                 p.yearsExperience(), p.includeInternships());
         sessions.save(user.id(), Session.idle());
         api.editMessageText(chatId, messageId, Texts.prefs(saved), Keyboards.prefsMenu());
+        sendRecentMatches(user);
         return "Saved.";
     }
 
@@ -169,6 +174,7 @@ class ProfileFlows {
                 p.includeInternships());
         sessions.save(user.id(), Session.idle());
         api.editMessageText(chatId, messageId, Texts.prefs(saved), Keyboards.prefsMenu());
+        sendRecentMatches(user);
         return "Saved.";
     }
 
@@ -185,8 +191,12 @@ class ProfileFlows {
             api.sendMessage(chatId, Texts.stepInternships(), Keyboards.internships());
             return null;
         }
-        return profileChange(user, chatId, messageId, p -> profiles.saveAnswers(user.id(), p.roles(),
+        String toast = profileChange(user, chatId, messageId, p -> profiles.saveAnswers(user.id(), p.roles(),
                 ProfileService.locations(p), years, p.includeInternships()));
+        if (!STALE.equals(toast)) {
+            sendRecentMatches(user);
+        }
+        return toast;
     }
 
     private String internshipsTapped(User user, Session session, boolean include, long chatId, long messageId) {
@@ -199,8 +209,12 @@ class ProfileFlows {
             api.sendMessage(chatId, Texts.stepResume(), Keyboards.skipResume());
             return null;
         }
-        return profileChange(user, chatId, messageId, p -> profiles.saveAnswers(user.id(), p.roles(),
+        String toast = profileChange(user, chatId, messageId, p -> profiles.saveAnswers(user.id(), p.roles(),
                 ProfileService.locations(p), p.yearsExperience(), include));
+        if (!STALE.equals(toast)) {
+            sendRecentMatches(user);
+        }
+        return toast;
     }
 
     private String skipResumeTapped(User user, Session session, long chatId, long messageId) {
@@ -271,7 +285,7 @@ class ProfileFlows {
         users.activate(user.id(), clock.instant());
         sessions.save(user.id(), Session.idle());
         profiles.find(user.id()).ifPresent(p -> api.sendMessage(chatId, Texts.alertsOn(p), null));
-        recentMatches.ifAvailable(r -> r.sendTo(user, chatId));
+        sendRecentMatches(user);
     }
 
     private Profile current(User user) {
