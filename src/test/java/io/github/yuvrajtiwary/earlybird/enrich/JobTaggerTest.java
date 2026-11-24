@@ -132,4 +132,10 @@ class JobTaggerTest {
         assertThat((List<String>) item.get("required")).contains("id", "role_category", "seniority", "min_years",
                 "fresher_friendly", "work_mode", "remote_scope", "cities", "skills", "summary");
     }
+
+    /** Regression: the real API rejects this schema with length limits ("too many states for serving"). */
+    @Test
+    void theSchemaHasNoLengthLimits() {
+        assertThat(JSON.writeValueAsString(JobTagger.schema())).doesNotContain("maxItems", "minItems", "maxLength");
+    }
 }

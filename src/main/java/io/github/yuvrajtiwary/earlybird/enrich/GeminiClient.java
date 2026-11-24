@@ -130,7 +130,9 @@ public class GeminiClient {
                         }
                         // Error bodies are usually Google's JSON, but a proxy's 502 can be an HTML page.
                         JsonNode error = lenientJson(response.getBody().readAllBytes());
-                        String message = "Gemini " + status + " " + error.path("error").path("status").asString("");
+                        String detail = error.path("error").path("message").asString("");
+                        String message = "Gemini " + status + " " + error.path("error").path("status").asString("")
+                                + (detail.isEmpty() ? "" : ": " + detail.substring(0, Math.min(200, detail.length())));
                         if (status == 429 || status >= 500) {
                             throw new RetryableFailure(message, retryDelay(error));
                         }

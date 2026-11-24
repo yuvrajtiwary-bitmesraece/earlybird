@@ -148,7 +148,7 @@ public class TaggingWorker implements SmartLifecycle {
                 admin.notifyOncePerDay("gemini-budget",
                         "Gemini's daily budget is used up; tagging uses the keyword fallback until it resets.");
             } else {
-                log.warn("Gemini tagging failed ({}), using the fallback for {} postings", e.kind(), batch.size() - result.size());
+                log.warn("Gemini tagging failed ({}), using the fallback for {} postings", e.getMessage(), batch.size() - result.size());
             }
         }
         Instant now = clock.instant();

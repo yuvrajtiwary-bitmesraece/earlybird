@@ -155,11 +155,14 @@ public class JobTagger {
         props.put("remote_scope", enumSchema(RemoteScope.class));
         props.put("cities", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")));
         props.put("countries", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")));
-        props.put("skills", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"), "maxItems", MAX_SKILLS));
+        props.put("skills", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")));
         props.put("summary", Map.of("type", "STRING"));
         Map<String, Object> posting = Map.of("type", "OBJECT", "properties", props, "required", List.copyOf(props.keySet()));
+        // No maxItems anywhere: with them, Gemini refused this schema in a real call ("too many states for
+        // serving"; nested length limits multiply the constrained-decoding states). Batch size and the 12-skill
+        // cap are enforced in Java instead.
         return Map.of("type", "OBJECT",
-                "properties", Map.of("postings", Map.of("type", "ARRAY", "items", posting, "maxItems", MAX_BATCH)),
+                "properties", Map.of("postings", Map.of("type", "ARRAY", "items", posting)),
                 "required", List.of("postings"));
     }
 
