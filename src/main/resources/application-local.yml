@@ -1,0 +1,5 @@
+# Local development (the default profile). Reads secrets from ./.env, which is gitignored.
+# Values already set as real environment variables win over .env.
+spring:
+  config:
+    import: optional:file:.env[.properties]

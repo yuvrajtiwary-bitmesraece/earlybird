@@ -1,0 +1,89 @@
+# Shared settings. Environment variable names come from docs/earlybird-spec.md section 5; the defaults
+# after ':' match .env.example. Locally, the `local` profile (the default) also reads ./.env.
+
+spring:
+  application:
+    name: earlybird
+  profiles:
+    default: local
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    hikari:
+      pool-name: earlybird-db
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 10000
+      # Every pooled connection gets search_path = DB_SCHEMA, so SQL never names the schema.
+      schema: ${earlybird.db-schema}
+  flyway:
+    schemas: ${earlybird.db-schema}
+    create-schemas: true
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+      group:
+        # Ready = can serve traffic, so it includes the database. Live = the process isn't stuck; it must NOT
+        # include the database, or a database outage would make the platform restart a healthy app in a loop.
+        readiness:
+          include: readinessState,db
+        liveness:
+          include: livenessState
+
+earlybird:
+  env: ${EARLYBIRD_ENV:dev}
+  roles: ${EARLYBIRD_ROLES:web,bot,poller,enricher,matcher,notifier,scheduler}
+  db-schema: ${DB_SCHEMA:earlybird}
+  public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
+  redis-url: ${REDIS_URL:}
+  metrics-token: ${METRICS_TOKEN:}
+  events:
+    bus: ${EVENT_BUS:memory}
+    topic-prefix: ${KAFKA_TOPIC_PREFIX:eb.}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+    security-protocol: ${KAFKA_SECURITY_PROTOCOL:SSL}
+    ssl-ca-pem: ${KAFKA_SSL_CA_PEM:}
+    ssl-cert-pem: ${KAFKA_SSL_CERT_PEM:}
+    ssl-key-pem: ${KAFKA_SSL_KEY_PEM:}
+    sasl-mechanism: ${KAFKA_SASL_MECHANISM:SCRAM-SHA-256}
+    sasl-username: ${KAFKA_SASL_USERNAME:}
+    sasl-password: ${KAFKA_SASL_PASSWORD:}
+  telegram:
+    bot-token: ${TELEGRAM_BOT_TOKEN:}
+    bot-username: ${TELEGRAM_BOT_USERNAME:}
+    mode: ${TELEGRAM_MODE:polling}
+    webhook-secret: ${TELEGRAM_WEBHOOK_SECRET:}
+    admin-chat-id: ${ADMIN_TELEGRAM_CHAT_ID:}
+    global-rate-per-sec: ${TELEGRAM_GLOBAL_RATE_PER_SEC:25}
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-3.5-flash-lite}
+    max-calls-per-day: ${GEMINI_MAX_CALLS_PER_DAY:400}
+  scheduler:
+    mode: ${SCHEDULER_MODE:internal}
+    qstash-current-signing-key: ${QSTASH_CURRENT_SIGNING_KEY:}
+    qstash-next-signing-key: ${QSTASH_NEXT_SIGNING_KEY:}
+    adaptive: ${ADAPTIVE_SCHEDULING:false}
+  alerts:
+    default-min-score: ${ALERT_DEFAULT_MIN_SCORE:55}
+    default-daily-cap: ${ALERT_DEFAULT_DAILY_CAP:10}
+    prep-link-template: ${PREP_LINK_TEMPLATE:}

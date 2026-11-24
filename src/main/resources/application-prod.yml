@@ -1,0 +1,6 @@
+# Production (Render). All values come from real environment variables; there is no .env file.
+logging:
+  structured:
+    format:
+      # One JSON object per log line (Elastic Common Schema), so log tools can filter by field.
+      console: ecs
