@@ -1,0 +1,10 @@
+# Integration tests. The database comes from Testcontainers (@ServiceConnection); these are dummy values
+# that satisfy configuration validation. No real secrets, no network calls.
+earlybird:
+  env: test
+  db-schema: earlybird
+  telegram:
+    bot-token: "123456:test-token"
+    bot-username: EarlyBirdTestBot
+  gemini:
+    api-key: test-gemini-key
