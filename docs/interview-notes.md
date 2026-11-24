@@ -101,3 +101,68 @@ One section per build block: what was built, why, the alternatives, what breaks 
    A unique constraint on `alerts (user_id, posting_id)`. The matcher inserts with `on conflict do nothing`, so a redelivered event or re-run tick is a no-op, and consumers also record `(event_id, consumer)` in `processed_events` in the same transaction. An integration test proves even raw SQL that bypasses the repository is rejected with a `DuplicateKeyException`.
 3. **"Why UUID v7 instead of an auto-increment id or a random UUID?"**
    The poller needs the id before the row is committed, because it goes into the event, so a database sequence would cost a round trip. Random v4 UUIDs land all over the B-tree index, causing page splits and cache misses. v7 starts with a millisecond timestamp, so inserts append at the end of the index like a sequence and ids sort by creation time. A test checks 10,000 ids are strictly increasing.
+
+---
+
+## Block 2 — Job sources and the poller (2026-11-24)
+
+### What was built
+- **Clients:** Greenhouse, Lever and Ashby, sharing one HTTP client:
+  - timeouts, gzip, at most 4 requests per host, retries for 5xx and timeouts
+  - ETags (`If-None-Match` → `304`)
+  - a 32 MB response cap
+- **The differ:**
+  - new jobs are inserted; seen jobs are refreshed; a job missing twice is closed and reopened if it returns
+  - a board that suddenly lists 0 jobs is ignored twice, then believed
+  - reposts are caught by content fingerprint
+  - plus the **baseline rule** (below)
+- **Seed list:** 130 boards, built by trying ~740 candidate companies on all three platforms and checking each board's identity and job locations. A `--validate-boards` command checks the list without starting Spring.
+- **Ticks and events:** a tick service runs every 3 minutes (internal scheduler). Events are published only after the database commit.
+- **Migration:** V2 adds `postings.baseline`, `boards.etag` and `boards.consecutive_empty_checks`.
+- **Measured on live boards:**
+  - baseline tick: 130 boards in 33 s, 16,336 jobs stored, **295** sent on for tagging, 0 failures, peak memory 321 MB
+  - steady state: 17 s per tick, 129 of 130 boards answering `304`
+
+### Why this design
+- **Fixtures first.** Real responses showed things the spec couldn't know:
+  - Lever has no publish time. Its `createdAt` is when the draft was made: a "new" CRED job said August.
+  - Ashby titles carry stray spaces.
+  - Greenhouse wraps company boilerplate in `content-intro` blocks.
+  - Zeta's Lever description spends its first 3,000 characters on "About us", so the requirements would have been cut off.
+
+  Each of these is now handled and pinned by a test against the real fixture.
+- **The baseline rule.** The first check of a board sees every existing job as new: 16,336 here. Tagging them all is ~1,090 Gemini calls against a 500-a-day quota, and alerting on them would spam users with month-old jobs. Baseline jobs are stored (needed to detect closures) but not alerted. Only those a trustworthy source says were published in the last 48 h are tagged, for "recent matches" and the digest. The rule applies per board, so boards added later get the same treatment.
+- **ETags turn most checks into a 304.** All three platforms support conditional GET. On 0.1 CPU the expensive part is parsing; an unchanged board now costs one small request and one `UPDATE`.
+- **Streaming JSON.** OpenAI's Ashby board is 14 MB. Reading it into one tree needs several times that in heap on a 512 MB instance. Jobs are read one at a time from the stream and discarded after conversion, and boards over 10 MB were left out of the seed list anyway.
+- **Don't trust a sudden zero.** A board that had 5+ jobs and suddenly lists none is more likely broken than empty. Closing everything would cancel every queued alert for that company. It's counted as a failure and only believed the third time in a row.
+- **Close on the second miss; reopen on return.** One flaky response can't close a job, and a job that reappears is reopened without being re-announced.
+- **Commit, then publish, then mark published.** Events go out only after the transaction commits, and `event_published_at` is set only after the bus accepts the event. A crash in between leaves a row with `event_published_at = null`, which the outbox relay (Block 5) republishes. Nothing is announced before it exists, and nothing is lost.
+- **Reposts by fingerprint.** `sha256(company | title | location | first 1,000 chars)`. Stripping boilerplate matters here too: if every job's text began with the same "About us", the fingerprint would effectively be just company and title.
+- **No Redis for de-duplication.** Postgres unique constraints decide, with `on conflict do nothing` (the spec forbids spending Redis commands on this).
+
+### Alternatives considered
+| Option | Why not |
+|---|---|
+| Always request Greenhouse with `content=true` | ~10× more data per check. Used only for a board's first check, or when more than 5 jobs are new at once |
+| Treat Lever's `createdAt` as the publish time | It's the draft's creation time; latency numbers would be wrong, and old jobs could look recent |
+| Parse each response into one JSON tree | Simple, but memory grows with the biggest board, and a 14 MB board is enough to hurt on 512 MB |
+| Regex to strip HTML | Breaks on real markup (entities, nesting, scripts); Jsoup parses like a browser |
+| Close a job the first time it's missing | One flaky response would cancel alerts |
+| Skip the baseline and accept the first flood | Burns 2+ days of Gemini quota and alerts on stale jobs |
+
+### What breaks first
+- **At 10× (~1,300 boards):**
+  - **Tick time.** At 4 requests per host and ~0.5 s per request to US-hosted APIs, 800 Greenhouse boards take ~100 s even when everything answers `304`. That's still under 3 minutes, but with no margin. The answer is the adaptive schedule already behind `ADAPTIVE_SCHEDULING` (busy boards every 3 minutes, quiet ones every 30).
+  - **Baseline memory spikes** when many big boards are added at once.
+- **At 100×:**
+  - Per-host politeness limits and platform rate limits (429s) dominate.
+  - Postgres write volume: an `UPDATE` per board per tick.
+  - The answer is to shard boards across several poller pods. Each pod takes a disjoint set (for example `board_id % N`), which the roles design allows.
+
+### Likely interview questions
+1. **"When you add a new company, how do you avoid alerting users about all its existing jobs?"**
+   A board's first successful check is a baseline. Existing jobs are stored, so we can detect when they close, but never alerted. When the source gives a trustworthy publish time, jobs from the last 48 hours are still tagged for the digest. On my first real run that was 16,336 stored vs 295 tagged, which is ~20 Gemini calls instead of ~1,090.
+2. **"Polling 130 boards every 3 minutes on a tenth of a CPU — how?"**
+   Conditional GET: I store each board's ETag and send it back, and unchanged boards answer `304` with no body, so 129 of 130 cost almost nothing. When a board has changed, I stream-parse it one job at a time, so a 14 MB response doesn't need 14 MB × N of heap. Requests run on virtual threads, limited to 4 per host. Database writes are 3–4 set-based statements per board, not one per job.
+3. **"What happens if a job board's API glitches and returns an empty list?"**
+   If a board that had 5+ jobs suddenly returns 0, I ignore it and count a failure. Only the third empty answer in a row is believed. Even then, a job needs two consecutive misses to close, and a job that reappears is reopened without a duplicate alert. So one bad response can't wipe out a company's jobs or cancel users' alerts.
