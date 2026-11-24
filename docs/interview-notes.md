@@ -51,3 +51,53 @@ One section per build block: what was built, why, the alternatives, what breaks 
    - GitHub secret scanning and push protection are on.
    - Generated secrets go straight from `openssl` into the file without being displayed.
    - My verification scripts print OK/FAIL, never values.
+
+---
+
+## Block 1 — Project skeleton (2026-11-24)
+
+### What was built
+- Spring Boot 4.2.0 on Java 25, built with the Maven wrapper (Maven 3.10.1), so a fresh machine needs only a JDK.
+- **Roles:** `@ConditionalOnRole(Role.POLLER)` turns a configuration class or bean on only when that role is in `EARLYBIRD_ROLES`.
+- **Typed config:** one `EarlyBirdProperties` record bound from the spec's environment variables, validated at startup.
+- **Schema:** Flyway V1 with all 10 tables from the spec; one `JdbcClient` repository per table.
+- **Interfaces with in-memory implementations:** `EventBus`, `DistributedLock` and `RateLimiter`. Kafka and Redis versions come later.
+- **Health:** liveness and readiness endpoints.
+- **CI:** a GitHub Actions workflow (moved forward from Block 8) that runs every test, including the Docker-based ones.
+- **Verified:** the packaged app started against the Supabase dev schema, applied V1, and reported ready. Restart in 7.3 s; 231 MB resident memory.
+
+### Why this design
+- **Roles instead of separate services.** One codebase and one image. On Render's single free container every role runs together; the Helm chart later gives each role its own Deployment. `@ConditionalOnRole` is a custom Spring `Condition` that reads `EARLYBIRD_ROLES` from the `Environment`, because conditions run before any bean (including the properties bean) exists.
+- **Config fails fast, with every problem at once.** The record's constructor checks everything and throws one message listing each problem by its environment-variable name ("GEMINI_API_KEY is required when roles include enricher or bot"). Requirements depend on roles, so a web-only pod doesn't need a Gemini key. `toString()` masks secrets, so logging the config can't leak them.
+- **`JdbcClient` and plain SQL, no JPA.** Less startup time and memory on 0.1 CPU, and every query is visible and explainable. Postgres features the app relies on (arrays, `jsonb`, `on conflict do nothing`, partial and GIN indexes) are first-class in SQL and awkward through an ORM.
+- **The database enforces the invariants.** Duplicates are prevented by unique constraints, not by "check then insert" code, which races. `insert … on conflict do nothing` returns whether the row was new, so callers learn "already seen" in one round trip. Enum columns are `text` with CHECK constraints, and a test inserts every Java enum value so the two lists can't drift apart.
+- **UUID v7 for postings and alerts.** Time-ordered, so index inserts stay at the right-hand edge like a sequence, but the app can create ids without asking the database (it needs the id before the event is published).
+- **The in-memory event bus mimics Kafka's model**: a key picks one of two lanes (like two partitions) and each lane handles one event at a time, so one user's alerts stay in order locally just as they will in Kafka.
+- **Lease-based lock.** A lock that expires on its own means a crashed tick can't block every later tick. Release is compare-and-delete, so a holder whose lease expired can't release someone else's lock.
+- **Token bucket refilled lazily.** No background thread: each call computes the refill from elapsed time, inside `ConcurrentHashMap.compute`, which is atomic per key. A test runs 64 threads against a 25-token bucket and gets exactly 25 grants. A unit test also caught a real floating-point bug (1 − 0.999 rounded up to 2 ms instead of 1 ms).
+- **Liveness ≠ readiness.** Readiness includes the database (don't send traffic if the database is down); liveness doesn't (a database outage shouldn't make the platform restart a healthy app in a loop).
+- **Tests that need Docker skip on the laptop but can't silently skip in CI.** `@Testcontainers(disabledWithoutDocker = true)` keeps `./mvnw verify` green with only a JDK; a CI step fails the build if any integration test was skipped.
+
+### Alternatives considered
+| Option | Why not |
+|---|---|
+| JPA / Hibernate | Slower startup and more memory on 0.1 CPU; hides SQL; weak fit for arrays, `jsonb`, upserts |
+| `@ConditionalOnProperty` per module | Works, but repeats a property expression everywhere; one annotation with a `Role` enum is type-safe and readable |
+| Bean Validation annotations on the config | Can't express "required only if role X is enabled" cleanly, and reports one field at a time |
+| H2 for tests | Different SQL dialect: no `text[]`, `jsonb` or the same `on conflict` behaviour, so tests would pass on SQL that fails in production |
+| Embedded Postgres binaries instead of Testcontainers | Would run locally without Docker, but the spec standardises on Testcontainers, and CI has Docker |
+| UUID v4 / `bigserial` | v4 scatters index inserts; `bigserial` needs a database round trip to learn the id |
+
+### What breaks first
+- **At 10×:** the in-memory lock and rate limiter assume one process. They're correct on Render's single instance, but a second instance would double the Telegram send rate and run ticks twice. That's why the Redis versions (Blocks 4 and 6) exist, with these as the fallback.
+- **At 100×:**
+  - Hikari's pool of 5 connections and Supabase's session-pooler connection limit; transaction pooling or a bigger database tier would be needed.
+  - The per-chat rate-limit map grows by one small entry per chat. That's fine for 10K users, but at millions it would need idle-entry eviction.
+
+### Likely interview questions
+1. **"How does one codebase run as a monolith on Render and as microservices in Kubernetes?"**
+   Modules never call each other directly; they publish and subscribe through an `EventBus` interface, which is Kafka in production. Each module's beans sit behind `@ConditionalOnRole`, and `EARLYBIRD_ROLES` picks which roles a process runs. On Render it's all of them in one container; in the Helm chart each Deployment sets a different subset. Same image, no code change.
+2. **"How do you guarantee a user never gets the same alert twice?"**
+   A unique constraint on `alerts (user_id, posting_id)`. The matcher inserts with `on conflict do nothing`, so a redelivered event or re-run tick is a no-op, and consumers also record `(event_id, consumer)` in `processed_events` in the same transaction. An integration test proves even raw SQL that bypasses the repository is rejected with a `DuplicateKeyException`.
+3. **"Why UUID v7 instead of an auto-increment id or a random UUID?"**
+   The poller needs the id before the row is committed, because it goes into the event, so a database sequence would cost a round trip. Random v4 UUIDs land all over the B-tree index, causing page splits and cache misses. v7 starts with a millisecond timestamp, so inserts append at the end of the index like a sequence and ids sort by creation time. A test checks 10,000 ids are strictly increasing.
