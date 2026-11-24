@@ -186,7 +186,8 @@ class BotIT {
         await().untilAsserted(() -> assertThat(users.findByTelegramUserId(telegramUserId)).isEmpty());
         assertThat(profiles.findByUserId(userId)).isEmpty();
         assertThat(sessions.find(userId)).isEmpty();
-        assertThat(messagesTo(telegramUserId)).anyMatch(m -> m.contains("has been deleted"));
+        // The confirmation replaces the "are you sure?" message (an edit, not a new message).
+        await().untilAsserted(() -> assertThat(editsIn(telegramUserId)).anyMatch(m -> m.contains("has been deleted")));
     }
 
     @Test
@@ -234,9 +235,18 @@ class BotIT {
                 .willReturn(aResponse().withBody(TestPdfs.withLines(TestPdfs.FAKE_RESUME))));
     }
 
-    /** Texts of all sendMessage calls to this chat. */
+    /** Bodies of all sendMessage calls to this chat. */
     private List<String> messagesTo(long chatId) {
-        return fake.findAll(postRequestedFor(urlPathMatching("/bot[^/]+/sendMessage"))
+        return callsTo("sendMessage", chatId);
+    }
+
+    /** Bodies of all editMessageText calls in this chat. */
+    private List<String> editsIn(long chatId) {
+        return callsTo("editMessageText", chatId);
+    }
+
+    private List<String> callsTo(String method, long chatId) {
+        return fake.findAll(postRequestedFor(urlPathMatching("/bot[^/]+/" + method))
                         .withRequestBody(matchingJsonPath("$.chat_id", equalTo(String.valueOf(chatId)))))
                 .stream().map(LoggedRequest::getBodyAsString).toList();
     }
