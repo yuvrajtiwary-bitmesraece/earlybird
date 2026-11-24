@@ -1,10 +1,16 @@
-# Integration tests. The database comes from Testcontainers (@ServiceConnection); these are dummy values
-# that satisfy configuration validation. No real secrets, no network calls.
+# Integration tests. The database comes from Testcontainers (@ServiceConnection) and the job boards from
+# an in-process WireMock server (see TestcontainersConfiguration). Dummy values satisfy config validation.
+# No real secrets, and no calls to real job boards.
 earlybird:
   env: test
+  # No scheduler role: tests trigger checks themselves, nothing runs on a timer.
+  roles: web,bot,poller,enricher,matcher,notifier
   db-schema: earlybird
   telegram:
     bot-token: "123456:test-token"
     bot-username: EarlyBirdTestBot
   gemini:
     api-key: test-gemini-key
+  sources:
+    # Don't load the ~130 real seed boards into the test database.
+    seed-file: ""
