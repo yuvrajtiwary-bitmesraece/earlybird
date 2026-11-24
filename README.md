@@ -4,7 +4,7 @@
 
 EarlyBird sends you a Telegram alert within minutes of a matching job going live on a company's careers page, with your match score and the skills you're missing.
 
-> **Status:** under construction. Blocks 1–3 of 13 are done: the project skeleton, polling 130 real job boards, and the Telegram bot (onboarding, resume parsing, commands). Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
+> **Status:** under construction. Blocks 1–4 of 13 are done: the project skeleton, polling 130 real job boards, the Telegram bot (onboarding, resume parsing, commands), and tagging, matching and alerts. Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
 
 ## How it works
 
@@ -87,6 +87,21 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 - **The first check of a board is a baseline:** jobs already on the board are stored (so closures can be detected) but not alerted. Only those the platform says were published in the last 48 hours go on to tagging.
 - **Unchanged boards cost almost nothing:** each board's ETag is sent back as `If-None-Match`, and an unchanged board answers `304 Not Modified` with no body.
 
+## Tagging, matching and alerts
+
+- **Tagging:** a new posting waits in Postgres until it is tagged (its description is kept only until then). A worker claims up to 15 at a time (`FOR UPDATE SKIP LOCKED`, with a 5-minute lease in case it dies) and sends them to Gemini in one call, as `p1`…`p15`, asking for schema-constrained JSON. Every field is validated and skills are normalized through [`skills.yaml`](src/main/resources/skills.yaml). Postings the model leaves out are retried once in a half-size batch.
+- **Fallback:** when Gemini fails after 3 tries or the day's budget (`GEMINI_MAX_CALLS_PER_DAY`) is spent, a keyword tagger takes over, so alerts never wait on Gemini. Its rows are marked `tagger = fallback`.
+- **Matching:** each tagged posting is compared with every active user who chose its role. A posting must pass three filters: location (a chosen city, with Delhi NCR and Mumbai treated as regions, or remote in India or worldwide), experience, and internships only if wanted.
+  - Score (0–100) = 65 × share of the posting's main skills you have + 20 × experience fit + 15 × location fit.
+  - Below 40: nothing. At or above your minimum (default 55): an instant alert. In between: the evening digest. Jobs found on a board's first check always go to the digest.
+- **Alerts:** title, company, location, score, the skills you have and the ones you're missing, with **Apply**, optional **Prep**, and 👍 / 👎 buttons.
+  - **No duplicates:** each alert is a row with a unique (user, posting) key, and it is claimed (`queued → sending`) before it is sent. A redelivered event or a re-run tick can't alert the same user twice about the same job.
+  - **Limits:** a daily cap per user (default 10; past it, matches go to the digest), one message per second per chat, and 25 per second overall (Telegram's bulk limit is about 30).
+  - **Failures:** Telegram 403 (the user blocked the bot) marks the user blocked; 429 and 5xx are retried.
+- **Digest:** at 20:00 IST each user gets one message with their top 10 queued matches of the day.
+- **Recent matches:** finishing onboarding or changing preferences sends the top 3 matches from the last 48 hours, so a new user doesn't start with silence.
+- **Redis is optional.** It holds the shared send rate, daily cap counters and a weekly "who's hiring freshers" ranking. With `REDIS_URL` empty, or Redis unreachable (then retried after 30 s), rates are limited in memory and caps are counted in Postgres.
+
 ## Tests
 
 ```bash
@@ -109,6 +124,9 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 | 2026-11-24 | Peak memory during the baseline tick (RSS) | 321 MB | Same, `-Xmx300m` |
 | 2026-11-24 | New jobs detected in the first hour after the baseline | 9 (0 failures); a Stripe job published at 17:46 was found at 17:46 | Laptop, ticks every 3 min |
 | 2026-11-24 | One resume through Gemini (`gemini-3.5-flash-lite`) | ~1.6 s, ~1,200 input tokens | Real API call, synthetic resume |
+| 2026-11-24 | Tagging the backlog from the baseline plus new jobs | 275 postings in 20 batches. Gemini answered 4 batches (47 postings); 16 got 503 "high demand" after 3 tries and went to the keyword fallback | Laptop → Gemini API, IST evening |
+| 2026-11-24 | Memory with every module running (poller, tagging, matcher, notifier, bot) | 253 MB peak working set | Laptop, `-Xmx300m -XX:+UseSerialGC` |
+| 2026-11-24 | New postings, 18:45–20:00 IST | 16 new jobs, all senior or non-technical, so 0 matches (correct) | Laptop, ticks every 3 min |
 
 Production figures (Render, 0.1 CPU / 512 MB) will be added in Block 8.
 
@@ -117,14 +135,16 @@ Production figures (Render, 0.1 CPU / 512 MB) will be added in Block 8.
 ```
 src/main/java/io/github/yuvrajtiwary/earlybird/
   config/       typed configuration, roles, @ConditionalOnRole
-  common/       UUID v7 ids, rate limiter
+  common/       UUID v7 ids, rate limiter, city names, Redis guard and Redis rate limiter
   events/       EventBus interface, envelope, in-memory bus, event payloads
   sources/      Greenhouse / Lever / Ashby clients, HTTP client, seed list, board validator
   poller/       per-board check (diff, baseline, reposts, empty guard), tick
-  enrich/       Gemini client and daily budget, skill vocabulary
+  enrich/       Gemini client and daily budget, batch tagger, fallback tagger, tagging worker, skill vocabulary
+  matching/     match rules (filters, score, routing), matcher, recent matches
+  alerts/       notifier, message format, daily caps, digest
   profiles/     resume pipeline (PDF text, contact stripping, Gemini), profile service
-  telegram/     Bot API client, webhook + polling, onboarding, commands, admin
-  ops/          distributed lock, internal scheduler
+  telegram/     Bot API client, webhook + polling, onboarding, commands, feedback buttons, admin
+  ops/          distributed lock, internal scheduler, admin notices
   persistence/  JdbcClient repositories and table records
 src/main/resources/db/migration/   Flyway migrations
 src/main/resources/boards/         seed-boards.csv
@@ -133,7 +153,7 @@ src/main/resources/prompts/        Gemini system instructions
 src/test/resources/fixtures/       real API responses used by the parser tests
 ```
 
-Later blocks add `matching/`, `alerts/` and `web/`.
+Later blocks add `web/`.
 
 ## License
 

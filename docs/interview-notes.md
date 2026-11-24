@@ -231,3 +231,80 @@ One section per build block: what was built, why, the alternatives, what breaks 
    - Every update id is inserted into a table with a primary key, so a redelivery is a no-op. A test sends the same update twice and checks the bot replied once.
 3. **"A user taps two buttons quickly. How do you avoid a race on their state?"**
    Updates are routed to lanes by user id, and each lane processes one update at a time. A user's taps are applied in order against their session row, while other users run in parallel on other lanes. The lanes have bounded queues; if one is full the webhook returns 503 and Telegram redelivers later. With several instances I'd move this ordering to Kafka, keyed by user id.
+
+## Block 4 — Tagging, matching and alerts (2026-11-24)
+
+### What was built
+- **Tagging worker:**
+  - Postgres is the work queue: a posting whose description is still stored needs tagging.
+  - The worker claims up to 15 rows with `FOR UPDATE SKIP LOCKED` and a 5-minute lease.
+  - It sends them to Gemini in one call as `p1`…`p15`, validates every field, retries missing ones once at half size, and falls back to a keyword tagger.
+  - New postings ring a doorbell; a 30-second sweep catches anything missed.
+- **Matcher:** pure rules (filters, score, routing) plus a consumer of `eb.jobs.enriched.v1` and `eb.jobs.closed.v1`. "Recent matches" are sent when onboarding finishes or preferences change.
+- **Notifier:**
+  - message format with Apply, Prep and 👍/👎 buttons; feedback stored on the alert
+  - daily caps (over the cap → digest)
+  - 1 message per second per chat, and 25 per second overall through a token bucket shared in Redis (a Lua script)
+  - retries; a 403 marks the user blocked
+- **Digest** at 20:00 IST, top 10 per user.
+- **Redis, kept optional:** `RedisGuard` wraps every call. It adds an environment key prefix, counts commands, and on failure falls back for 30 seconds.
+- **Verified:**
+  - CI: 314 unit and 46 integration tests, 84.5% line coverage. The pipeline test goes fake board → tick → tagging → matching → fake Telegram, and a race test delivers one alert 8 times at once.
+  - Live on the laptop against real boards, Gemini, Supabase and Upstash:
+    - 290+ real postings tagged.
+    - The 20:00 digest fired on time.
+    - The real API exposed the schema limit, and real postings exposed three fallback-tagger bugs.
+  - A real instant alert in Telegram was still waiting for a matching new job at the time of writing: in ~75 minutes of US-morning ticks, every new job was senior or non-technical.
+
+### Why this design
+- **The database is the tagging queue.** Postings already live in a table, so a "needs tagging" marker plus `SKIP LOCKED` claims gives at-least-once processing that survives restarts, with nothing new to run. Batching 15 rows is easy from a table. From a stream it means buffering and committing offsets by hand. Kafka (Block 5) still carries the events; the queue stays in Postgres.
+- **15 postings per Gemini call.** The free tier allows 500 calls a day. One posting per call caps the whole service at 500 postings a day; batching raises that to 7,500.
+  - Short ids (`p1`) instead of UUIDs save tokens, and the model can't garble them.
+  - Ids not in the batch are ignored; postings left out are retried, then fall back.
+- **Model output is validated like user input.** Unknown enum values become `other`/`unknown`, years are clamped, a max below the min is dropped, only two-letter country codes are kept, and skills go through the vocabulary.
+- **The real API found a limit the docs don't spell out.** With `maxItems` on the nested arrays, Gemini refused the schema ("too many states for serving"). The limits moved into Java, and a test keeps them out of the schema.
+- **A fallback so alerts never wait on Gemini.** During this block's live run Gemini answered 503 "high demand" for most batches: 16 of 20 batches (228 of 275 postings) went to the fallback. The keyword tagger kept the pipeline moving. Real postings exposed two of its bugs, both fixed with the real text as test cases:
+  - "1.5 years" was read as 5 years, which hid a junior job from freshers.
+  - "a global leader" in the description made a New Jersey job "remote worldwide".
+- **Scoring is a pure function.** `MatchRules` has no I/O, so it's tested with tables of cases. The weights are integers (65/20/15): in floating point, `0.2 × 0.7` came out as 13.999… and rounding changed a score.
+- **Duplicates are impossible by construction, not by care:**
+  - `alerts` has a unique (user, posting) key and inserts use `on conflict do nothing`, so re-running the matcher creates nothing.
+  - The notifier claims an alert with `update … set status = 'sending' where status = 'queued'`. Only one copy of a redelivered event wins.
+  - The cap is reserved only after the claim. Writing the race test found the opposite order: losing copies used up the cap and could push the winner's alert back into the digest, so it was sent twice.
+  - An integration test delivers one alert 8 times at once and checks Telegram got exactly one message.
+- **Redis is an optimization, never a dependency.** Caps fall back to counting sent alerts in Postgres, and rates fall back to an in-memory bucket. Upstash dropped a connection during the live run; the guard switched to the fallbacks for 30 seconds and nothing else noticed.
+- **The Gemini call counter stays in Postgres only** (a deliberate deviation from the spec's "Redis with a Postgres fallback"). One upsert per call, at most ~500 a day, is nothing for Postgres. It avoids a second source of truth that can disagree, and saves Redis commands.
+
+### Alternatives considered
+| Option | Why not |
+|---|---|
+| A Redis list or Kafka topic as the tagging queue | Another moving part; batching and retrying from a table is simpler and survives restarts |
+| One Gemini call per posting | 15× the quota; 500 calls a day would cap the whole service |
+| Embedding similarity for matching | An embedding call per posting and profile, and less explainable; "you're missing Kafka" is a set difference, which embeddings don't give you |
+| Scoring in SQL | Harder to test and explain; after the role filter the candidate list is already small |
+| Redis as the only store for caps | A Redis flush or outage would reset or lose them |
+| Exactly-once delivery (Kafka transactions) | Heavy; a unique key plus an atomic claim gives users the same guarantee |
+
+### What breaks first
+- **At 10× (~50 users, ~1,300 boards):**
+  - **Gemini capacity, not quota.** ~2,000 new postings a day is ~140 calls, well inside 500. But a long 503 spell means many postings get rough fallback tags, and nothing re-tags them later. Next step: re-tag `tagger = fallback` rows when Gemini recovers.
+  - Ticks get longer (up to 45 s with 130 boards today). They need to overlap or be split by host.
+- **At 100× (~500 users):**
+  - **Upstash's 500K commands a month.** Each alert costs ~4 Redis commands (bucket script, cap INCR + EXPIRE). 500 users × 10 alerts × 30 days × 4 = 600K. Fixes: on a single instance, keep the rate bucket in memory; or count caps in Postgres only.
+  - **Digest burst:** 500 messages at 25/s takes 20 s, which is fine. At 5,000 users it takes over 3 minutes, so it needs spreading out or a second sender.
+
+### Likely interview questions
+1. **"How do you make sure a user never gets the same alert twice?"**
+   - Two layers. First, the database: `alerts` has a unique key on (user, posting), so even if the matcher runs twice for a posting, the second insert does nothing.
+   - Second, the send itself: copies of the same event race to run `update … set status = 'sending' where status = 'queued'`, and only the one that changes a row sends.
+   - The order matters. I first checked the daily cap before claiming, and my race test showed losing copies could use up the cap and push the alert back into the digest, so it went out twice. Now nothing happens before the claim.
+   - The test fires 8 copies at once and asserts one Telegram message.
+2. **"Why put 15 postings in one LLM call? What if the model skips one or makes one up?"**
+   - Free-tier quota is per call, so batching multiplies capacity 15×.
+   - Each posting gets a short id (`p1`…`p15`). Answers with ids I didn't send are ignored, and ids that come back missing are retried once in a smaller batch, then given keyword tags.
+   - Every field is validated: enums, numeric ranges, country codes, skill names through a vocabulary.
+   - Structured output has limits of its own: Gemini rejected my schema when it had array length limits, so those checks live in Java.
+3. **"Redis goes down. What happens?"**
+   - Nothing the user sees. Every Redis call goes through one guard; on the first failure it stops calling Redis for 30 seconds and the fallbacks answer.
+   - The send rate is limited in memory, and daily caps are counted from the alerts table.
+   - The cost is that with several instances the global rate becomes per-instance, so I keep the per-instance limit under Telegram's ceiling. It happened for real in the live run: Upstash dropped a connection mid-tagging, and the pipeline carried on.
