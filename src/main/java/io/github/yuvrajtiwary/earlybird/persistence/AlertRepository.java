@@ -2,6 +2,7 @@ package io.github.yuvrajtiwary.earlybird.persistence;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -42,6 +43,39 @@ public class AlertRepository {
                 .param("feedback", Sql.db(a.feedback()))
                 .param("feedbackAt", Sql.ts(a.feedbackAt()))
                 .update() == 1;
+    }
+
+    /** What {@code /stats} shows: one user's alerts since {@code since}. */
+    public record UserStats(int total, int instant, int digest, int sent, int relevant, int notRelevant,
+            String mostMissingSkill) {}
+
+    public UserStats statsForUser(long userId, Instant since) {
+        UserStats counts = jdbc.sql("""
+                        select count(*) as total,
+                               count(*) filter (where mode = 'instant') as instant,
+                               count(*) filter (where mode = 'digest') as digest,
+                               count(*) filter (where status = 'sent') as sent,
+                               count(*) filter (where feedback = 'relevant') as relevant,
+                               count(*) filter (where feedback = 'not_relevant') as not_relevant
+                        from alerts where user_id = :u and created_at >= :since
+                        """)
+                .param("u", userId)
+                .param("since", Sql.ts(since))
+                .query((rs, row) -> new UserStats(rs.getInt("total"), rs.getInt("instant"), rs.getInt("digest"),
+                        rs.getInt("sent"), rs.getInt("relevant"), rs.getInt("not_relevant"), null))
+                .single();
+        String missing = jdbc.sql("""
+                        select skill from alerts, unnest(missing_skills) as skill
+                        where user_id = :u and created_at >= :since
+                        group by skill order by count(*) desc, skill limit 1
+                        """)
+                .param("u", userId)
+                .param("since", Sql.ts(since))
+                .query(String.class)
+                .optional()
+                .orElse(null);
+        return new UserStats(counts.total(), counts.instant(), counts.digest(), counts.sent(), counts.relevant(),
+                counts.notRelevant(), missing);
     }
 
     public Optional<Alert> findById(UUID id) {

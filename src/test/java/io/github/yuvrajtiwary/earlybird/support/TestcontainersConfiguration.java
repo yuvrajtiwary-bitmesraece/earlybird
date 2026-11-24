@@ -36,12 +36,15 @@ public class TestcontainersConfiguration {
         return server;
     }
 
+    /** Every external service points at the one WireMock; tests stub what they need by path. */
     @Bean
-    DynamicPropertyRegistrar jobBoardUrls(WireMockServer fakeJobBoards) {
+    DynamicPropertyRegistrar externalServiceUrls(WireMockServer fakeJobBoards) {
         return registry -> {
             registry.add("earlybird.sources.greenhouse-base-url", fakeJobBoards::baseUrl);
             registry.add("earlybird.sources.lever-base-url", fakeJobBoards::baseUrl);
             registry.add("earlybird.sources.ashby-base-url", fakeJobBoards::baseUrl);
+            registry.add("earlybird.telegram.api-base-url", fakeJobBoards::baseUrl);
+            registry.add("earlybird.gemini.base-url", fakeJobBoards::baseUrl);
         };
     }
 }

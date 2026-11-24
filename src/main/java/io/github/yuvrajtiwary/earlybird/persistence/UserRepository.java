@@ -50,6 +50,22 @@ public class UserRepository {
                 .update() == 1;
     }
 
+    /** Onboarding finished: alerts on, and the moment the user agreed to the privacy note is recorded once. */
+    public void activate(long id, Instant now) {
+        jdbc.sql("update users set status = 'active', consent_at = coalesce(consent_at, :now) where id = :id")
+                .param("now", Sql.ts(now))
+                .param("id", id)
+                .update();
+    }
+
+    /** Called on every message, so /admin can tell active users from dormant ones. */
+    public void touch(long id, Instant now) {
+        jdbc.sql("update users set last_active_at = :now where id = :id")
+                .param("now", Sql.ts(now))
+                .param("id", id)
+                .update();
+    }
+
     /** Hard delete. The foreign keys cascade to the profile, bot session and alerts ({@code /delete}). */
     public boolean delete(long id) {
         return jdbc.sql("delete from users where id = :id").param("id", id).update() == 1;

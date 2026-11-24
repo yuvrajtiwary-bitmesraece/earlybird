@@ -228,4 +228,58 @@ class RepositoriesIT {
         assertThat(ticks.findById(id)).contains(
                 new TickRepository.Tick(id, NOW, finished, 120, 2, 7, 3, TickRepository.Status.PARTIAL));
     }
+
+    @Autowired GeminiUsageRepository geminiUsage;
+    @Autowired OpsStatsRepository opsStats;
+
+    @Test
+    void theGeminiCounterStopsAtTheCapAtomically() {
+        java.time.LocalDate day = java.time.LocalDate.of(2001, 1, (int) (TELEGRAM_IDS.incrementAndGet() % 28) + 1);
+        jdbc.sql("delete from gemini_usage where day = :d").param("d", day).update();
+
+        assertThat(geminiUsage.tryIncrement(day, 2)).hasValue(1);
+        assertThat(geminiUsage.tryIncrement(day, 2)).hasValue(2);
+        assertThat(geminiUsage.tryIncrement(day, 2)).isEmpty();
+        assertThat(geminiUsage.used(day)).isEqualTo(2);
+        assertThat(geminiUsage.tryIncrement(day, 0)).isEmpty();
+    }
+
+    @Test
+    void activationRecordsConsentOnlyOnce() {
+        User user = newUser();
+        users.activate(user.id(), NOW);
+        users.activate(user.id(), NOW.plusSeconds(3600));
+
+        User active = users.findById(user.id()).orElseThrow();
+        assertThat(active.status()).isEqualTo(User.Status.ACTIVE);
+        assertThat(active.consentAt()).isEqualTo(NOW);
+    }
+
+    @Test
+    void userStatsCountAlertsFeedbackAndTheMostMissingSkill() {
+        User user = newUser();
+        Board board = newBoard();
+        for (int i = 0; i < 3; i++) {
+            Alert a = new Alert(Ids.newId(), user.id(), newPosting(board).id(), 70, List.of("Java"),
+                    i < 2 ? List.of("Kafka", "Docker") : List.of("Docker"), i == 0 ? Alert.Mode.DIGEST : Alert.Mode.INSTANT,
+                    Alert.Status.SENT, NOW, NOW, null, i == 0 ? Alert.Feedback.NOT_RELEVANT : Alert.Feedback.RELEVANT, NOW);
+            alerts.insertIfAbsent(a);
+        }
+
+        AlertRepository.UserStats stats = alerts.statsForUser(user.id(), NOW.minusSeconds(60));
+
+        assertThat(stats).isEqualTo(new AlertRepository.UserStats(3, 2, 1, 3, 2, 1, "Docker"));
+        assertThat(alerts.statsForUser(user.id(), NOW.plusSeconds(60)).total()).isZero();
+    }
+
+    @Test
+    void opsStatsAnswer() {
+        newPosting(newBoard());
+        ticks.start(NOW);
+
+        assertThat(opsStats.latestTick()).isPresent();
+        assertThat(opsStats.boardHealth().enabled()).isPositive();
+        assertThat(opsStats.newPostingsSince(NOW.minusSeconds(1))).isPositive();
+        assertThat(opsStats.alertsSince(Instant.EPOCH)).isNotNegative();
+    }
 }

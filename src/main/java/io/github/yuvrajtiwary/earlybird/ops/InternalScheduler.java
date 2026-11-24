@@ -18,8 +18,8 @@ public class InternalScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(InternalScheduler.class);
 
-    static final String TICK_LOCK = "tick";
-    static final Duration TICK_LOCK_TTL = Duration.ofMinutes(10);
+    public static final String TICK_LOCK = "tick";
+    public static final Duration TICK_LOCK_TTL = Duration.ofMinutes(10);
 
     private final DistributedLock lock;
     private final ObjectProvider<TickService> ticks;
