@@ -1,0 +1,31 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "{\"skills\": [\"Java\", \"Python\", \"JS\", \"SQL\", \"springboot\", \"React\", \"Git\", \"Linux\", \"DSA\", \"PostgreSQL\", \"Redis\", \"Kafka\", \"Docker\", \"AWS\", \"EC2\", \"S3\", \"GitHub Actions\", \"k8s\", \"Telegram Bot API\"], \"years_experience\": 0, \"graduation_year\": 2025, \"suggested_roles\": [\"backend\", \"fullstack\"]}",
+            "thoughtSignature": "EpYBCpMBAWkUfRPjtzLgsvLPsCoR92MpwNpqYBl2EnvQLHh/8S9Clc3sei0XJ2ldfA9q92wKsteYqQ0p8tQ5RT30f6K5hdx4KBKrhIFvmkWWh41Ve3TzTuEzaY2+15YAcqvGThRwp/poHI113C5AD/4XED7r58EpQ+bRNBiwTHjuVcW5ZJHRAhqvqDQZ1ZoqaeestTQC13IL"
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 232,
+    "candidatesTokenCount": 100,
+    "totalTokenCount": 332,
+    "promptTokensDetails": [
+      {
+        "modality": "TEXT",
+        "tokenCount": 232
+      }
+    ],
+    "serviceTier": "standard"
+  },
+  "modelVersion": "gemini-3.5-flash-lite",
+  "responseId": "m3kFa9q4L_mL694PpIunEQ"
+}

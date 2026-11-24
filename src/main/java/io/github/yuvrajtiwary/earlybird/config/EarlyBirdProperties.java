@@ -84,27 +84,35 @@ public record EarlyBirdProperties(
         }
     }
 
+    /** @param apiBaseUrl overridden only by tests, which point it at a fake Telegram */
     public record Telegram(
             String botToken,
             String botUsername,
             TelegramMode mode,
             String webhookSecret,
             Long adminChatId,
-            int globalRatePerSec) {
+            int globalRatePerSec,
+            @DefaultValue("https://api.telegram.org") URI apiBaseUrl) {
 
         @Override
         public String toString() {
             return "Telegram[botToken=" + mask(botToken) + ", botUsername=" + botUsername + ", mode=" + mode
                     + ", webhookSecret=" + mask(webhookSecret) + ", adminChatId=" + adminChatId
-                    + ", globalRatePerSec=" + globalRatePerSec + "]";
+                    + ", globalRatePerSec=" + globalRatePerSec + ", apiBaseUrl=" + apiBaseUrl + "]";
         }
     }
 
-    public record Gemini(String apiKey, String model, int maxCallsPerDay) {
+    /** @param baseUrl overridden only by tests, which point it at a fake Gemini */
+    public record Gemini(
+            String apiKey,
+            String model,
+            int maxCallsPerDay,
+            @DefaultValue("https://generativelanguage.googleapis.com") URI baseUrl) {
 
         @Override
         public String toString() {
-            return "Gemini[apiKey=" + mask(apiKey) + ", model=" + model + ", maxCallsPerDay=" + maxCallsPerDay + "]";
+            return "Gemini[apiKey=" + mask(apiKey) + ", model=" + model + ", maxCallsPerDay=" + maxCallsPerDay
+                    + ", baseUrl=" + baseUrl + "]";
         }
     }
 
