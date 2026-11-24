@@ -54,6 +54,10 @@ class FallbackTaggerTest {
         "Graduate Software Engineer | NEW_GRAD",
         "Junior Backend Developer | JUNIOR",
         "SDE 1 | JUNIOR",
+        "SDE-I | JUNIOR",
+        "Software Engineer I | JUNIOR",
+        "Software Engineer-I | JUNIOR",
+        "Software Engineer II | UNKNOWN",
         "Senior Backend Engineer | SENIOR",
         "Staff Engineer | STAFF_PLUS",
         "Engineering Manager | STAFF_PLUS",
@@ -79,6 +83,31 @@ class FallbackTaggerTest {
         assertThat(t.skills()).startsWith("Java", "Spring Boot", "PostgreSQL").contains("Kafka", "Docker");
         assertThat(t.skills()).doesNotContain("JavaScript"); // "Java" mustn't be read as JavaScript or vice versa
         assertThat(t.tagger()).isEqualTo(Tagger.FALLBACK);
+    }
+
+    @ParameterizedTest(name = "{0} -> {1}..{2}")
+    @CsvSource(delimiter = '|', nullValues = "-", value = {
+        // Real Toast posting: was read as "5 years" (the 5 of 1.5), which hid it from freshers.
+        "06 months - 1.5 years of experience as a software engineer | 0.5 | 1.5",
+        "6 months to 2 years of experience | 0.5 | 2.0",
+        "1.5+ years of experience | 1.5 | -",
+        "2-4 years of experience | 2.0 | 4.0",
+        "3 to 5 yrs building APIs | 3.0 | 5.0",
+        "10+ years in distributed systems | 10.0 | -",
+        "Founded in 2015. 3+ years with Go | 3.0 | -",
+        "No experience requirement stated | - | -",
+    })
+    void yearsOfExperience(String text, Double min, Double max) {
+        assertThat(FallbackTagger.years(text)).isEqualTo(new FallbackTagger.Years(min, max));
+    }
+
+    @Test
+    void underAYearIsFresherFriendly() {
+        PostingTags t = tag("Software Engineer-I", "Bengaluru,Karnataka,India",
+                "Requirements: 06 months - 1.5 years of experience as a software engineer.");
+        assertThat(t.seniority()).isEqualTo(Seniority.JUNIOR);
+        assertThat(t.minYears()).isEqualTo(0.5);
+        assertThat(t.fresherFriendly()).isTrue();
     }
 
     @Test

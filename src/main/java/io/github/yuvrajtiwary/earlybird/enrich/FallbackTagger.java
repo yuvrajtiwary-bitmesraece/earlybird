@@ -43,11 +43,17 @@ public class FallbackTagger {
 
     private static final Pattern INTERN = words("intern|internship|trainee|apprentice");
     private static final Pattern NEW_GRAD = words("new grad|graduate|fresher|freshers|campus|entry level|entry-level|university");
-    private static final Pattern JUNIOR = words("junior|jr|associate|sde i|sde 1|sde-1|engineer i|engineer 1|level 1");
+    private static final Pattern JUNIOR = words("junior|jr|associate|sde[- ]?i|sde[- ]?1|engineer[- ]i|engineer[- ]1|developer[- ]i|level 1");
     private static final Pattern STAFF_PLUS = words("staff|principal|architect|director|head of|vp|vice president|manager");
     private static final Pattern SENIOR = words("senior|sr|lead");
-    private static final Pattern YEARS = Pattern.compile(
-            "(\\d{1,2})\\s*(?:\\+|plus)?\\s*(?:(?:-|–|to)\\s*(\\d{1,2})\\s*)?\\+?\\s*(?:years|yrs|year)", Pattern.CASE_INSENSITIVE);
+    /** A number of years, possibly decimal ("1.5"); never starts inside another number ("1.5" is not "5"). */
+    private static final String YEAR_NUMBER = "(?<![\\d.])(\\d{1,2}(?:\\.\\d)?)";
+    private static final Pattern YEARS = Pattern.compile(YEAR_NUMBER
+            + "\\s*(?:\\+|plus)?\\s*(?:(?:-|–|to)\\s*(\\d{1,2}(?:\\.\\d)?)\\s*)?\\+?\\s*(?:years|yrs|year)", Pattern.CASE_INSENSITIVE);
+    /** A range that starts in months: "06 months - 1.5 years". */
+    private static final Pattern MONTHS_TO_YEARS = Pattern.compile(
+            "(?<![\\d.])(\\d{1,2})\\s*months?\\s*(?:-|–|to)\\s*(\\d{1,2}(?:\\.\\d)?)\\s*\\+?\\s*(?:years|yrs|year)",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern FRESHER_TEXT = words("fresher|freshers|recent graduate|new grad|entry level|0-1 years?|0-2 years?|0 to 2 years");
 
     private static final Map<String, String> COUNTRIES = Map.ofEntries(
@@ -70,15 +76,11 @@ public class FallbackTagger {
         String text = title + "\n" + location + "\n" + description;
 
         Seniority seniority = seniority(title);
-        Double min = null;
-        Double max = null;
-        Matcher years = YEARS.matcher(text);
-        if (years.find()) {
-            min = Math.min(30.0, Double.parseDouble(years.group(1)));
-            max = years.group(2) == null ? null : Math.min(30.0, Double.parseDouble(years.group(2)));
-        }
+        Years years = years(text);
+        Double min = years.min();
+        Double max = years.max();
         boolean fresher = seniority == Seniority.INTERN || seniority == Seniority.NEW_GRAD
-                || (min != null && min == 0.0) || FRESHER_TEXT.matcher(text).find();
+                || (min != null && min < 1.0) || FRESHER_TEXT.matcher(text).find();
         WorkMode mode = workMode(location + "\n" + title + "\n" + description);
         List<String> countries = countries(location);
 
@@ -87,6 +89,28 @@ public class FallbackTagger {
                 mode == WorkMode.REMOTE ? remoteScope(location + "\n" + description, countries) : RemoteScope.UNKNOWN,
                 Cities.findIn(location), countries, vocabulary.findIn(title + "\n" + description, JobTagger.MAX_SKILLS),
                 null, Tagger.FALLBACK, null, now);
+    }
+
+    record Years(Double min, Double max) {}
+
+    /** The first experience range in the text, in years; both null if there is none. */
+    static Years years(String text) {
+        Matcher inYears = YEARS.matcher(text);
+        Matcher fromMonths = MONTHS_TO_YEARS.matcher(text);
+        boolean y = inYears.find();
+        boolean m = fromMonths.find();
+        if (m && (!y || fromMonths.start() <= inYears.start())) {
+            return new Years(Math.round(Integer.parseInt(fromMonths.group(1)) / 12.0 * 10) / 10.0,
+                    cappedYears(fromMonths.group(2)));
+        }
+        if (y) {
+            return new Years(cappedYears(inYears.group(1)), inYears.group(2) == null ? null : cappedYears(inYears.group(2)));
+        }
+        return new Years(null, null);
+    }
+
+    private static Double cappedYears(String number) {
+        return Math.min(30.0, Double.parseDouble(number));
     }
 
     static RoleCategory role(String title) {
