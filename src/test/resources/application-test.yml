@@ -19,3 +19,6 @@ earlybird:
   sources:
     # Don't load the ~130 real seed boards into the test database.
     seed-file: ""
+  tagging:
+    # Tests call TaggingWorker.drain() themselves, so nothing is tagged behind their back.
+    background: false

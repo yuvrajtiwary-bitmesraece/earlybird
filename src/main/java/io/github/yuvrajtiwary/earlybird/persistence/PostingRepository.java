@@ -150,6 +150,49 @@ public class PostingRepository {
                 .list());
     }
 
+    /**
+     * Claims up to {@code limit} postings that still need tagging (they keep a description until tagged),
+     * newest first so fresh jobs aren't stuck behind a backlog. A claim is a lease: rows claimed more than
+     * {@code lease} ago (a worker that died) can be claimed again. {@code skip locked} lets several workers
+     * claim at once without waiting on each other or taking the same rows.
+     */
+    public List<Posting> claimUntagged(int limit, Instant now, java.time.Duration lease, Instant notBefore) {
+        return jdbc.sql("""
+                        with claimable as (
+                            select id from postings
+                            where description_text is not null
+                              and first_seen_at >= :notBefore
+                              and (tag_claimed_at is null or tag_claimed_at < :leaseExpired)
+                            order by first_seen_at desc
+                            limit :limit
+                            for update skip locked
+                        )
+                        update postings p set tag_claimed_at = :now
+                        from claimable c where p.id = c.id
+                        returning p.*
+                        """)
+                .param("notBefore", Sql.ts(notBefore))
+                .param("leaseExpired", Sql.ts(now.minus(lease)))
+                .param("limit", limit)
+                .param("now", Sql.ts(now))
+                .query(PostingRepository::map)
+                .list();
+    }
+
+    /** Tagged: the description has served its purpose (we never republish job text) and the lease ends. */
+    public void finishTagging(UUID id) {
+        jdbc.sql("update postings set description_text = null, tag_claimed_at = null where id = :id")
+                .param("id", id)
+                .update();
+    }
+
+    public int countUntagged(Instant notBefore) {
+        return jdbc.sql("select count(*) from postings where description_text is not null and first_seen_at >= :since")
+                .param("since", Sql.ts(notBefore))
+                .query(Integer.class)
+                .single();
+    }
+
     /** Outbox-lite: called only after the event bus accepted the PostingDiscovered events. */
     public int markPublished(Collection<UUID> ids, Instant now) {
         if (ids.isEmpty()) {

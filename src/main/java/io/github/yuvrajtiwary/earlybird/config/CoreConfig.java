@@ -8,6 +8,7 @@ import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 /**
  * Beans every role needs. The lock and rate limiter are in-memory for now; the Redis-backed versions
@@ -28,8 +29,10 @@ class CoreConfig {
         return new InMemoryDistributedLock(clock);
     }
 
+    /** The default limiter: in-process (per-user and per-chat limits). See RedisConfig for the shared one. */
     @Bean
-    RateLimiter rateLimiter(Clock clock) {
+    @Primary
+    RateLimiter localRateLimiter(Clock clock) {
         return new TokenBucketRateLimiter(clock);
     }
 }

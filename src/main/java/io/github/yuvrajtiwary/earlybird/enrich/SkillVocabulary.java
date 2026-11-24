@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -32,14 +33,22 @@ public final class SkillVocabulary {
     private static final Pattern TRAILING_VERSION = Pattern.compile("[\\s._\\-]*v?\\d+(\\.\\d+)*\\+?$");
     private static final Pattern HAS_LETTER = Pattern.compile("\\p{L}");
 
+    private static final Set<String> SHORT_BUT_DISTINCT = Set.of("c++", "c#", ".net");
+
+    /** A name or alias to look for in free text, and the skill it means. */
+    private record SearchTerm(Pattern pattern, String canonical) {}
+
     private final Map<String, String> canonicalByKey;
     private final Set<String> ignoredKeys;
     private final List<String> canonicalNames;
+    private final List<SearchTerm> searchTerms;
 
-    private SkillVocabulary(Map<String, String> canonicalByKey, Set<String> ignoredKeys, List<String> canonicalNames) {
+    private SkillVocabulary(Map<String, String> canonicalByKey, Set<String> ignoredKeys, List<String> canonicalNames,
+            List<SearchTerm> searchTerms) {
         this.canonicalByKey = Map.copyOf(canonicalByKey);
         this.ignoredKeys = Set.copyOf(ignoredKeys);
         this.canonicalNames = List.copyOf(canonicalNames);
+        this.searchTerms = List.copyOf(searchTerms);
     }
 
     public static SkillVocabulary fromClasspath() {
@@ -60,6 +69,7 @@ public final class SkillVocabulary {
         Map<String, String> byKey = new HashMap<>();
         Set<String> ignored = new HashSet<>();
         List<String> names = new ArrayList<>();
+        List<SearchTerm> terms = new ArrayList<>();
         for (Map.Entry<String, Object> entry : raw.entrySet()) {
             List<Object> aliases = entry.getValue() == null ? List.of() : (List<Object>) entry.getValue();
             if (entry.getKey().equals("_ignore")) {
@@ -69,11 +79,22 @@ public final class SkillVocabulary {
             String canonical = entry.getKey().strip();
             names.add(canonical);
             register(byKey, canonical, canonical);
+            addSearchTerm(terms, canonical, canonical);
             for (Object alias : aliases) {
                 register(byKey, String.valueOf(alias), canonical);
+                addSearchTerm(terms, String.valueOf(alias), canonical);
             }
         }
-        return new SkillVocabulary(byKey, ignored, names);
+        return new SkillVocabulary(byKey, ignored, names, terms);
+    }
+
+    private static void addSearchTerm(List<SearchTerm> terms, String name, String canonical) {
+        String lower = name.strip().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+        if (lower.length() < 3 && !SHORT_BUT_DISTINCT.contains(lower)) {
+            return;
+        }
+        // Not inside a longer word: "java" must not match "javascript", "react" must not match "reactive".
+        terms.add(new SearchTerm(Pattern.compile("(?<![a-z0-9+#.])" + Pattern.quote(lower) + "(?![a-z0-9+#])"), canonical));
     }
 
     private static void register(Map<String, String> byKey, String name, String canonical) {
@@ -127,6 +148,41 @@ public final class SkillVocabulary {
             String name = canonical(raw).orElseGet(() -> tidyUnknown(raw));
             if (name != null) {
                 out.putIfAbsent(key(name), name);
+            }
+        }
+        return List.copyOf(out.values());
+    }
+
+    /**
+     * Known skills mentioned anywhere in free text, in order of first mention, for the fallback tagger. Only
+     * names and aliases of 3+ characters are searched (plus C++, C# and .NET): short ones like "Go", "R" or
+     * "ML" match ordinary words ("go to market") far too often.
+     */
+    public List<String> findIn(String text, int max) {
+        if (text == null || text.isBlank()) {
+            return List.of();
+        }
+        String haystack = " " + text.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ") + " ";
+        record Hit(int start, int end, String canonical) {}
+        List<Hit> hits = new ArrayList<>();
+        for (SearchTerm term : searchTerms) {
+            Matcher m = term.pattern().matcher(haystack);
+            while (m.find()) {
+                hits.add(new Hit(m.start(), m.end(), term.canonical()));
+            }
+        }
+        // Longest match wins where terms overlap: "Spring Boot" must not also count as "Spring".
+        hits.sort(java.util.Comparator.comparingInt(Hit::start).thenComparing(h -> -(h.end() - h.start())));
+        Map<String, String> out = new LinkedHashMap<>();
+        int coveredUntil = -1;
+        for (Hit hit : hits) {
+            if (hit.start() < coveredUntil) {
+                continue; // inside a longer term already counted
+            }
+            coveredUntil = hit.end();
+            out.putIfAbsent(hit.canonical(), hit.canonical());
+            if (out.size() >= max) {
+                break;
             }
         }
         return List.copyOf(out.values());

@@ -23,6 +23,14 @@ spring:
   flyway:
     schemas: ${earlybird.db-schema}
     create-schemas: true
+  data:
+    redis:
+      # Empty means no Redis: locks, rate limits and caps fall back to memory or Postgres.
+      url: ${REDIS_URL:}
+      timeout: 2s
+      connect-timeout: 3s
+      repositories:
+        enabled: false
   lifecycle:
     timeout-per-shutdown-phase: 20s
 
@@ -31,6 +39,10 @@ server:
   shutdown: graceful
 
 management:
+  health:
+    redis:
+      # Redis is optional (everything has a fallback), so it must not make the app "unhealthy".
+      enabled: false
   endpoints:
     web:
       exposure:

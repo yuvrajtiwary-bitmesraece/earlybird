@@ -1,6 +1,8 @@
 package io.github.yuvrajtiwary.earlybird.telegram;
 
 import io.github.yuvrajtiwary.earlybird.common.RateLimiter;
+import io.github.yuvrajtiwary.earlybird.common.redis.RedisConfig;
+import org.springframework.beans.factory.annotation.Qualifier;
 import io.github.yuvrajtiwary.earlybird.config.ConditionalOnRole;
 import io.github.yuvrajtiwary.earlybird.config.EarlyBirdProperties;
 import io.github.yuvrajtiwary.earlybird.config.Role;
@@ -11,6 +13,7 @@ import io.github.yuvrajtiwary.earlybird.persistence.BotSessionRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.OpsStatsRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.TelegramUpdateRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.UserRepository;
+import io.github.yuvrajtiwary.earlybird.matching.RecentMatches;
 import io.github.yuvrajtiwary.earlybird.poller.TickService;
 import io.github.yuvrajtiwary.earlybird.profiles.ProfileService;
 import io.github.yuvrajtiwary.earlybird.profiles.ResumeAnalyzer;
@@ -35,9 +38,11 @@ class TelegramConfig {
     /** The client is shared by the bot and (Block 4) the notifier. */
     @Bean
     @ConditionalOnRole({Role.BOT, Role.NOTIFIER})
-    TelegramApi telegramApi(EarlyBirdProperties properties, RateLimiter rateLimiter) {
+    TelegramApi telegramApi(EarlyBirdProperties properties,
+            @Qualifier(RedisConfig.SHARED_RATE_LIMITER) RateLimiter sharedRateLimiter) {
         var telegram = properties.telegram();
-        return new TelegramApi(telegram.apiBaseUrl(), telegram.botToken(), rateLimiter, telegram.globalRatePerSec());
+        return new TelegramApi(telegram.apiBaseUrl(), telegram.botToken(), sharedRateLimiter,
+                telegram.globalRatePerSec());
     }
 
     @Configuration(proxyBeanMethods = false)
@@ -51,7 +56,7 @@ class TelegramConfig {
 
         @Bean
         ProfileFlows profileFlows(TelegramApi api, UserRepository users, SessionStore sessions,
-                ProfileService profiles, Clock clock, ObjectProvider<ProfileFlows.RecentMatches> recentMatches) {
+                ProfileService profiles, Clock clock, ObjectProvider<RecentMatches> recentMatches) {
             return new ProfileFlows(api, users, sessions, profiles, clock, recentMatches);
         }
 
