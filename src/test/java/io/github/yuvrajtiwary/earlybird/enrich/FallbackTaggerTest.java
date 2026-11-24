@@ -129,6 +129,11 @@ class FallbackTaggerTest {
         assertThat(tag("Engineer", "Remote - India", "").remoteScope()).isEqualTo(RemoteScope.COUNTRY);
         assertThat(tag("Engineer", "Remote (EMEA)", "").remoteScope()).isEqualTo(RemoteScope.REGION);
         assertThat(tag("Engineer", "Bengaluru", "").remoteScope()).isEqualTo(RemoteScope.UNKNOWN);
+        assertThat(tag("Engineer", "Remote - Worldwide", "").remoteScope()).isEqualTo(RemoteScope.WORLDWIDE);
+        // Real case (Rubrik): company boilerplate isn't a statement about where you can work from.
+        assertThat(tag("Account Executive", "Remote - New Jersey",
+                "Rubrik is a global leader in cyber resilience, serving customers globally.").remoteScope())
+                .isEqualTo(RemoteScope.UNKNOWN);
     }
 
     @Test

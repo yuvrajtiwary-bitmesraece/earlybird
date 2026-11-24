@@ -86,7 +86,7 @@ public class FallbackTagger {
 
         return new PostingTags(p.id(), role(title), seniority, min, max, fresher,
                 employment(title + "\n" + description, seniority), mode,
-                mode == WorkMode.REMOTE ? remoteScope(location + "\n" + description, countries) : RemoteScope.UNKNOWN,
+                mode == WorkMode.REMOTE ? remoteScope(location, description, countries) : RemoteScope.UNKNOWN,
                 Cities.findIn(location), countries, vocabulary.findIn(title + "\n" + description, JobTagger.MAX_SKILLS),
                 null, Tagger.FALLBACK, null, now);
     }
@@ -172,12 +172,16 @@ public class FallbackTagger {
         return WorkMode.UNKNOWN;
     }
 
-    private static RemoteScope remoteScope(String text, List<String> countries) {
-        String lower = text.toLowerCase(Locale.ROOT);
-        if (words("worldwide|anywhere|global|globally").matcher(lower).find()) {
+    /**
+     * Single words are trusted only in the location field. Descriptions say "global" about the company all the
+     * time ("a global leader in…"), so there only explicit phrases count.
+     */
+    private static RemoteScope remoteScope(String location, String description, List<String> countries) {
+        if (words("worldwide|anywhere|global").matcher(location).find()
+                || words("work from anywhere|anywhere in the world|remote worldwide|worldwide remote").matcher(description).find()) {
             return RemoteScope.WORLDWIDE;
         }
-        if (words("apac|asia|emea|europe|americas|latam|north america").matcher(lower).find()) {
+        if (words("apac|asia|emea|europe|americas|latam|north america").matcher(location).find()) {
             return RemoteScope.REGION;
         }
         return countries.size() == 1 ? RemoteScope.COUNTRY : RemoteScope.UNKNOWN;
