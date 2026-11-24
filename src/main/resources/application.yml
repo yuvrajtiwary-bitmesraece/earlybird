@@ -25,8 +25,10 @@ spring:
     create-schemas: true
   data:
     redis:
-      # Empty means no Redis: locks, rate limits and caps fall back to memory or Postgres.
-      url: ${REDIS_URL:}
+      # Whether Redis is used is decided by earlybird.redis-url below (empty = no Redis: locks, rate limits
+      # and caps fall back to memory or Postgres). Boot rejects an empty URL at startup, so without REDIS_URL
+      # it gets a placeholder that is never dialed: Lettuce connects lazily and nothing asks for a connection.
+      url: ${REDIS_URL:redis://localhost:6379}
       timeout: 2s
       connect-timeout: 3s
       repositories:
