@@ -166,3 +166,68 @@ One section per build block: what was built, why, the alternatives, what breaks 
    Conditional GET: I store each board's ETag and send it back, and unchanged boards answer `304` with no body, so 129 of 130 cost almost nothing. When a board has changed, I stream-parse it one job at a time, so a 14 MB response doesn't need 14 MB × N of heap. Requests run on virtual threads, limited to 4 per host. Database writes are 3–4 set-based statements per board, not one per job.
 3. **"What happens if a job board's API glitches and returns an empty list?"**
    If a board that had 5+ jobs suddenly returns 0, I ignore it and count a failure. Only the third empty answer in a row is believed. Even then, a job needs two consecutive misses to close, and a job that reappears is reopened without a duplicate alert. So one bad response can't wipe out a company's jobs or cancel users' alerts.
+
+---
+
+## Block 3 — Telegram bot, onboarding and resume parsing (2026-11-24)
+
+### What was built
+- **Bot API client:** a thin client for the methods we use, with no framework.
+- **Receiving updates:**
+  - a webhook for production (constant-time secret check, 200 at once)
+  - long polling for local development
+  - a dispatcher that handles each user's updates in order and drops duplicates
+- **Onboarding:** a state machine stored in Postgres. Then `/prefs`, `/skills`, `/upload`, `/pause`, `/unpause`, `/stats`, `/delete`, `/help`, `/cancel`, plus `/admin` and `/admin_tick` for the admin.
+- **Resume pipeline:** PDFBox → contact details removed → Gemini (structured JSON) → normalized skills on the profile.
+- **Supporting pieces:**
+  - the skill vocabulary (moved forward from Block 4)
+  - a Gemini REST client with retries
+  - a daily Gemini budget counted per Pacific-time day (V3 migration)
+- **Verified:**
+  - CI: 210 unit and 37 integration tests. The bot tests drive the real webhook with fake Telegram and Gemini.
+  - A live run: onboarding plus a real resume on the dev bot (32 skills extracted, confirmed by the user), while the poller found 9 new jobs in the first hour.
+
+### Why this design
+- **A thin client, not a bot framework.** We need ten methods. A framework would add its own threading, its own update loop and its own JSON stack, all of which I'd have to explain and work around. Here every request is visible and the whole client is one file.
+- **Updates are handled per user, in order.** Updates go to 16 lanes by user id, and each lane runs one update at a time. Two quick taps on a toggle can't race on the same session row, and different users still run in parallel. Each lane's queue is bounded: when it's full the webhook answers 503, so Telegram redelivers later instead of us queueing without limit.
+- **Idempotency.** Telegram retries webhook calls it isn't sure about. `telegram_updates` (update id as primary key) makes the second delivery a no-op; a test posts the same update twice and checks the bot answered once.
+- **Secret check in constant time.** `MessageDigest.isEqual` doesn't stop at the first mismatching byte, so response timing can't be used to guess the secret one character at a time.
+- **Conversation state in the database.** `bot_sessions` holds the step and the answers so far as JSON, so a redeploy in the middle of onboarding loses nothing. Old buttons (from a finished flow) are answered with "out of date" and change nothing.
+- **Privacy by construction.** The resume PDF is read in memory and never stored. Contact details (emails, Indian/international phones, links, addresses and PIN codes, a name-like first line) are stripped before the text leaves the server. Only skills, years, graduation year, suggested roles and the file hash are kept, and the hash lets a re-upload skip Gemini. An integration test checks that the request Gemini receives contains none of the fake resume's contact details.
+- **The model is a tool, not an authority.** Output is schema-constrained, then validated: skills normalized through the vocabulary, years clamped, unknown roles dropped. The resume is labelled untrusted in the prompt, and a real test resume containing "ignore all previous instructions" was ignored.
+- **Real calls found two real problems.**
+  - Gemini returned 503 "high demand" on the first try, hence retries with backoff and jitter.
+  - Without today's date in the prompt, it counted "Aug 2025 – present" as 0 years. With the date it says 1.3.
+- **REST instead of Google's SDK.** The SDK pulls in Jackson 2 and its own HTTP stack next to Spring Boot 4's Jackson 3. A plain HTTP API is easy to fake in tests, and the key goes in a header, never the URL.
+- **The bot token is in every Telegram URL**, and Spring's exception messages include the URL. So the client rebuilds every error from Telegram's own JSON, without the original exception or its message. A test points the client at a closed port and checks the error doesn't contain the token.
+
+### Alternatives considered
+| Option | Why not |
+|---|---|
+| A Telegram bot framework | Hides threading and retries; more to explain than ten HTTP calls |
+| One global executor for all updates | Two taps from one user could run at once and overwrite each other's session |
+| Keeping onboarding state in memory | A restart or deploy mid-onboarding would lose it |
+| Sending the raw resume to Gemini | Leaks names, phones and addresses to a third party for no benefit |
+| An NER model for PII removal | Better recall, but it's a model to host; rules plus tests cover the realistic cases on 0.1 CPU |
+| Storing the PDF "to re-parse later" | A liability; the hash is enough to skip duplicate work |
+
+### What breaks first
+- **At 10× (~50 users):**
+  - **Resume parsing shares Gemini's budget with job tagging.** A burst of uploads on launch day could use up the day's calls; then the bot says "try again in a few hours", and tagging falls back to keywords. Possible fixes: a separate sub-budget for resumes, or a queue.
+  - **PDFBox on 0.1 CPU:** a few seconds per resume is fine one at a time, not twenty at once.
+- **At 100×:**
+  - **The webhook needs more than one instance**, and then the in-memory per-user lanes no longer guarantee order. Telegram itself doesn't order updates across connections either. The fix is to route by user id (a Kafka topic keyed by user id gives exactly this).
+  - The per-user command limit moves to Redis.
+
+### Likely interview questions
+1. **"You send resumes to an LLM. How do you protect users' privacy?"**
+   - The file is never stored: it's read in memory and dropped, and we keep only the extracted skills, years, graduation year and a hash.
+   - Before anything leaves the server, emails, phone numbers, links, address and PIN-code lines and the name line are stripped. Tests cover the tricky cases: international phone formats; "Node.js/Express" and "2021 – 2025" must survive.
+   - An integration test asserts the request Gemini receives has none of the fake resume's contact details.
+   - Users see the consent text before every upload, and `/delete` removes everything via cascading foreign keys.
+2. **"How is your webhook secured, and what if Telegram sends the same update twice?"**
+   - Telegram sends a secret header that I compare in constant time, so a wrong or missing secret gets 401.
+   - I return 200 immediately and process asynchronously, because Telegram retries slow responses.
+   - Every update id is inserted into a table with a primary key, so a redelivery is a no-op. A test sends the same update twice and checks the bot replied once.
+3. **"A user taps two buttons quickly. How do you avoid a race on their state?"**
+   Updates are routed to lanes by user id, and each lane processes one update at a time. A user's taps are applied in order against their session row, while other users run in parallel on other lanes. The lanes have bounded queues; if one is full the webhook returns 503 and Telegram redelivers later. With several instances I'd move this ordering to Kafka, keyed by user id.

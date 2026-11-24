@@ -4,7 +4,7 @@
 
 EarlyBird sends you a Telegram alert within minutes of a matching job going live on a company's careers page, with your match score and the skills you're missing.
 
-> **Status:** under construction. Blocks 1–2 of 13 are done: the project skeleton, and polling 130 real job boards. Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
+> **Status:** under construction. Blocks 1–3 of 13 are done: the project skeleton, polling 130 real job boards, and the Telegram bot (onboarding, resume parsing, commands). Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
 
 ## How it works
 
@@ -60,8 +60,16 @@ You need **JDK 25** only; the Maven wrapper downloads Maven itself.
    ```
    The `local` profile is the default and reads `.env`. Locally the event bus is in-process (`EVENT_BUS=memory`) and jobs are scheduled inside the app (`SCHEDULER_MODE=internal`).
 3. Check it: <http://localhost:8080/actuator/health/readiness> should say `UP`.
+4. Talk to it: open your **dev** bot in Telegram and send `/start`. Locally the bot long-polls Telegram (`TELEGRAM_MODE=polling`), so no public URL is needed. Use a separate dev bot: a bot can have a webhook or be polled, never both, so polling the production bot would break production.
 
 If a setting is missing or wrong, startup stops with a list of every problem, each naming the environment variable to fix.
+
+## The Telegram bot
+
+- **Onboarding:** `/start` walks through roles, locations, experience, internships and an optional resume PDF, then turns alerts on. Progress is stored in `bot_sessions`, so a restart mid-way loses nothing.
+- **Commands:** `/prefs`, `/skills` (`add Kafka, Docker` / `remove PHP`), `/upload`, `/pause`, `/unpause`, `/stats`, `/delete`, `/help`, `/cancel`. The admin chat also has `/admin` and `/admin_tick`.
+- **Resumes:** the PDF is read in memory (first 5 pages). Emails, phone numbers, links, addresses and the name line are removed, and only then is the text sent to Gemini, which extracts skills, years of full-time experience, graduation year and suggested roles. Only those facts and the file's SHA-256 are kept; the file and its text are not. The consent text is shown before every upload.
+- **Production** uses a webhook (`POST /telegram/webhook`) checked with a secret header; duplicate deliveries are ignored, and each user's updates are handled in order.
 
 ## Job sources
 
@@ -99,6 +107,8 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 | 2026-11-24 | First tick (baseline of 130 boards) | 33 s; 16,336 jobs stored, 295 sent on for tagging; 0 failures | Laptop → live boards + Supabase Singapore |
 | 2026-11-24 | Steady-state tick | 17 s; 129 of 130 boards answered 304 Not Modified | Same |
 | 2026-11-24 | Peak memory during the baseline tick (RSS) | 321 MB | Same, `-Xmx300m` |
+| 2026-11-24 | New jobs detected in the first hour after the baseline | 9 (0 failures); a Stripe job published at 17:46 was found at 17:46 | Laptop, ticks every 3 min |
+| 2026-11-24 | One resume through Gemini (`gemini-3.5-flash-lite`) | ~1.6 s, ~1,200 input tokens | Real API call, synthetic resume |
 
 Production figures (Render, 0.1 CPU / 512 MB) will be added in Block 8.
 
@@ -111,14 +121,19 @@ src/main/java/io/github/yuvrajtiwary/earlybird/
   events/       EventBus interface, envelope, in-memory bus, event payloads
   sources/      Greenhouse / Lever / Ashby clients, HTTP client, seed list, board validator
   poller/       per-board check (diff, baseline, reposts, empty guard), tick
+  enrich/       Gemini client and daily budget, skill vocabulary
+  profiles/     resume pipeline (PDF text, contact stripping, Gemini), profile service
+  telegram/     Bot API client, webhook + polling, onboarding, commands, admin
   ops/          distributed lock, internal scheduler
   persistence/  JdbcClient repositories and table records
 src/main/resources/db/migration/   Flyway migrations
 src/main/resources/boards/         seed-boards.csv
+src/main/resources/skills.yaml     canonical skill names and aliases
+src/main/resources/prompts/        Gemini system instructions
 src/test/resources/fixtures/       real API responses used by the parser tests
 ```
 
-Later blocks add `enrich/`, `profiles/`, `matching/`, `alerts/`, `telegram/` and `web/`.
+Later blocks add `matching/`, `alerts/` and `web/`.
 
 ## License
 
