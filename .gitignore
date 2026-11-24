@@ -1,0 +1,48 @@
+# --- Secrets: never commit. Only .env.example is tracked. ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+
+# --- Build output ---
+target/
+!.mvn/wrapper/maven-wrapper.jar
+build/
+out/
+
+# --- Logs and temp files ---
+*.log
+logs/
+*.tmp
+hs_err_pid*.log
+replay_pid*.log
+
+# --- IDEs and editors ---
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+.classpath
+.project
+.settings/
+.factorypath
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Terraform ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# --- Local reports (validate-boards output, load test results) ---
+reports/
