@@ -1,0 +1,124 @@
+{
+  "jobs": [
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/hackerrank/jobs/8394096",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3622947,
+      "location": {
+        "name": "Remote in New York, New Jersey, Boston, Washington D.C., Philadelphia"
+      },
+      "metadata": [
+        {
+          "id": 49285989,
+          "name": "Team Name",
+          "value": "Sales",
+          "value_type": "short_text"
+        },
+        {
+          "id": 64163573,
+          "name": "Featured",
+          "value": null,
+          "value_type": "yes_no"
+        }
+      ],
+      "id": 8394096,
+      "updated_at": "2026-11-16T18:27:12-05:00",
+      "requisition_id": "26Q4-673",
+      "title": "Account Executive - Enterprise - East",
+      "company_name": "HackerRank Careers",
+      "first_published": "2026-11-16T16:08:54-05:00",
+      "language": "en",
+      "application_deadline": null
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/hackerrank/jobs/8393739",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3622813,
+      "location": {
+        "name": "San Francisco Bay Area, Los Angeles, Seattle, Salt Lake City, Phoenix, Denver"
+      },
+      "metadata": [
+        {
+          "id": 49285989,
+          "name": "Team Name",
+          "value": "Sales",
+          "value_type": "short_text"
+        },
+        {
+          "id": 64163573,
+          "name": "Featured",
+          "value": null,
+          "value_type": "yes_no"
+        }
+      ],
+      "id": 8393739,
+      "updated_at": "2026-11-16T18:18:10-05:00",
+      "requisition_id": "26Q4-672",
+      "title": "Account Executive - Enterprise - West",
+      "company_name": "HackerRank Careers",
+      "first_published": "2026-11-16T16:12:20-05:00",
+      "language": "en",
+      "application_deadline": null
+    },
+    {
+      "absolute_url": "https://job-boards.greenhouse.io/hackerrank/jobs/8394518",
+      "data_compliance": [
+        {
+          "type": "gdpr",
+          "requires_consent": false,
+          "requires_processing_consent": false,
+          "requires_retention_consent": false,
+          "retention_period": null,
+          "demographic_data_consent_applies": false
+        }
+      ],
+      "internal_job_id": 3623122,
+      "location": {
+        "name": "Remote in San Francisco Bay Area, Los Angeles, Seattle, New York, New Jersey, Philadelphia, Boston, Washington D.C., Phoenix, Salt Lake City, Denver"
+      },
+      "metadata": [
+        {
+          "id": 49285989,
+          "name": "Team Name",
+          "value": "Sales",
+          "value_type": "short_text"
+        },
+        {
+          "id": 64163573,
+          "name": "Featured",
+          "value": null,
+          "value_type": "yes_no"
+        }
+      ],
+      "id": 8394518,
+      "updated_at": "2026-11-17T13:09:48-05:00",
+      "requisition_id": "26Q4-674",
+      "title": "Account Executive - Strategic",
+      "company_name": "HackerRank Careers",
+      "first_published": "2026-11-17T13:03:53-05:00",
+      "language": "en",
+      "application_deadline": null
+    }
+  ],
+  "meta": {
+    "total": 3
+  }
+}

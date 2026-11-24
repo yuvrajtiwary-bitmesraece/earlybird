@@ -1,0 +1,133 @@
+# EarlyBird seed boards: companies that hire in India or remotely, on Greenhouse, Lever or Ashby.
+# Loaded at startup (insert-if-absent). Check with: java -jar app.jar --validate-boards
+source,token,company
+ashby,1password,1Password
+ashby,airwallex,Airwallex
+ashby,atlan,Atlan
+ashby,benchling,Benchling
+ashby,bureau,Bureau
+ashby,clickhouse,ClickHouse
+ashby,cohere,Cohere
+ashby,composio,Composio
+ashby,cursor,Cursor
+ashby,ema,Ema
+ashby,gen-digital,Gen Digital
+ashby,gigaml,Giga ML
+ashby,kraken.com,Kraken
+ashby,linear,Linear
+ashby,notion,Notion
+ashby,oyster,Oyster HR
+ashby,perplexity,Perplexity
+ashby,plane,Plane
+ashby,redis,Redis
+ashby,sarvam,Sarvam AI
+ashby,signoz,SigNoz
+ashby,snowflake,Snowflake
+ashby,snyk,Snyk
+ashby,supabase,Supabase
+ashby,tekion,Tekion
+ashby,temporal,Temporal
+ashby,thought-machine,Thought Machine
+ashby,uipath,UiPath
+ashby,vanta,Vanta
+ashby,vultr,Vultr
+ashby,webflow,Webflow
+ashby,zapier,Zapier
+greenhouse,abnormalsecurity,Abnormal Security
+greenhouse,adyen,Adyen
+greenhouse,agoda,Agoda
+greenhouse,airbnb,Airbnb
+greenhouse,anthropic,Anthropic
+greenhouse,binance,Binance
+greenhouse,bitwarden,Bitwarden
+greenhouse,block,Block
+greenhouse,brave,Brave
+greenhouse,canonical,Canonical
+greenhouse,celonis,Celonis
+greenhouse,chainguard,Chainguard
+greenhouse,cloudsek,CloudSEK
+greenhouse,coinbase,Coinbase
+greenhouse,commvault,Commvault
+greenhouse,connectwise,ConnectWise
+greenhouse,coursera,Coursera
+greenhouse,cribl,Cribl
+greenhouse,databricks,Databricks
+greenhouse,datadog,Datadog
+greenhouse,devrev,DevRev
+greenhouse,doordashusa,DoorDash
+greenhouse,druva,Druva
+greenhouse,duolingo,Duolingo
+greenhouse,elastic,Elastic
+greenhouse,purestorage,Everpure (Pure Storage)
+greenhouse,fastly,Fastly
+greenhouse,figma,Figma
+greenhouse,fivetran,Fivetran
+greenhouse,flexport,Flexport
+greenhouse,gitlab,GitLab
+greenhouse,glance,Glance
+greenhouse,gleanwork,Glean
+greenhouse,grafanalabs,Grafana Labs
+greenhouse,gravitonresearchcapital,Graviton Research Capital
+greenhouse,groww,Groww
+greenhouse,hackerrank,HackerRank
+greenhouse,harnessinc,Harness
+greenhouse,highradius,HighRadius
+greenhouse,wehrtyou,Hudson River Trading
+greenhouse,imc,IMC Trading
+greenhouse,inmobi,InMobi
+greenhouse,jumptrading,Jump Trading
+greenhouse,kaseya,Kaseya
+greenhouse,logicmonitor,LogicMonitor
+greenhouse,mongodb,MongoDB
+greenhouse,gomotive,Motive
+greenhouse,mozilla,Mozilla
+greenhouse,netlify,Netlify
+greenhouse,netskope,Netskope
+greenhouse,newrelic,New Relic
+greenhouse,observeai,Observe.AI
+greenhouse,okta,Okta
+greenhouse,okx,OKX
+greenhouse,payoneer,Payoneer
+greenhouse,razorpaysoftwareprivatelimited,Razorpay
+greenhouse,reddit,Reddit
+greenhouse,rubrik,Rubrik
+greenhouse,samsara,Samsara
+greenhouse,scaleai,Scale AI
+greenhouse,sigmoid,Sigmoid
+greenhouse,solarwinds,SolarWinds
+greenhouse,squarepointcapital,Squarepoint Capital
+greenhouse,starburst,Starburst
+greenhouse,stripe,Stripe
+greenhouse,sumologic,Sumo Logic
+greenhouse,toast,Toast
+greenhouse,towerresearchcapital,Tower Research Capital
+greenhouse,truefoundry,TrueFoundry
+greenhouse,turing,Turing
+greenhouse,twilio,Twilio
+greenhouse,veeamsoftware,Veeam
+greenhouse,wikimedia,Wikimedia Foundation
+greenhouse,wizinc,Wiz
+greenhouse,worldquant,WorldQuant
+greenhouse,yugabyte,Yugabyte
+greenhouse,zenoti,Zenoti
+greenhouse,zocdoc,Zocdoc
+greenhouse,zscaler,Zscaler
+greenhouse,zuora,Zuora
+lever,100ms,100ms
+lever,acceldata,Acceldata
+lever,cred,CRED
+lever,dozee,Dozee
+lever,extremenetworks,Extreme Networks
+lever,fampay,Fampay
+lever,hevodata,Hevo Data
+lever,meesho,Meesho
+lever,mindtickle,MindTickle
+lever,netomi,Netomi
+lever,nium,Nium
+lever,outreach,Outreach
+lever,paytm,Paytm
+lever,pocketfm,Pocket FM
+lever,spotify,Spotify
+lever,sysdig,Sysdig
+lever,tala,Tala
+lever,zeta,Zeta

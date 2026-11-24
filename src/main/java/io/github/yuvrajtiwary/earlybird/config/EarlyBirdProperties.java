@@ -32,7 +32,8 @@ public record EarlyBirdProperties(
         @DefaultValue Telegram telegram,
         @DefaultValue Gemini gemini,
         @DefaultValue Scheduler scheduler,
-        @DefaultValue Alerts alerts) {
+        @DefaultValue Alerts alerts,
+        @DefaultValue Sources sources) {
 
     private static final Pattern ENV_NAME = Pattern.compile("[a-z0-9-]{1,20}");
     private static final Pattern SQL_IDENTIFIER = Pattern.compile("[a-z_][a-z0-9_]{0,62}");
@@ -42,8 +43,8 @@ public record EarlyBirdProperties(
 
     public EarlyBirdProperties {
         roles = (roles == null || roles.isEmpty()) ? Set.of() : Collections.unmodifiableSet(EnumSet.copyOf(roles));
-        List<String> problems =
-                problems(env, roles, dbSchema, publicBaseUrl, events, kafka, telegram, gemini, scheduler, alerts);
+        List<String> problems = problems(
+                env, roles, dbSchema, publicBaseUrl, events, kafka, telegram, gemini, scheduler, alerts, sources);
         if (!problems.isEmpty()) {
             throw new IllegalArgumentException(
                     "Invalid EarlyBird configuration:\n  - " + String.join("\n  - ", problems));
@@ -119,13 +120,30 @@ public record EarlyBirdProperties(
 
     public record Alerts(int defaultMinScore, int defaultDailyCap, String prepLinkTemplate) {}
 
+    /**
+     * Where the job-board APIs live (overridden only by tests, which point them at a fake server) and the
+     * seed list loaded at startup. An empty {@code seedFile} skips seeding.
+     */
+    public record Sources(
+            @DefaultValue("https://boards-api.greenhouse.io") URI greenhouseBaseUrl,
+            @DefaultValue("https://api.lever.co") URI leverBaseUrl,
+            @DefaultValue("https://api.ashbyhq.com") URI ashbyBaseUrl,
+            @DefaultValue("classpath:boards/seed-boards.csv") String seedFile) {}
+
     @Override
     public String toString() {
         return "EarlyBirdProperties[env=" + env + ", roles=" + roles + ", dbSchema=" + dbSchema
                 + ", publicBaseUrl=" + publicBaseUrl + ", redisUrl=" + mask(redisUrl)
                 + ", metricsToken=" + mask(metricsToken) + ", events=" + events + ", kafka=" + kafka
                 + ", telegram=" + telegram + ", gemini=" + gemini + ", scheduler=" + scheduler
-                + ", alerts=" + alerts + "]";
+                + ", alerts=" + alerts + ", sources=" + sources + "]";
+    }
+
+    private static boolean isHttpUrl(URI uri) {
+        return uri != null
+                && uri.isAbsolute()
+                && ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
+                && uri.getHost() != null;
     }
 
     private static String mask(String secret) {
@@ -146,7 +164,8 @@ public record EarlyBirdProperties(
             Telegram telegram,
             Gemini gemini,
             Scheduler scheduler,
-            Alerts alerts) {
+            Alerts alerts,
+            Sources sources) {
         var p = new ArrayList<String>();
         boolean web = roles.contains(Role.WEB);
         boolean bot = roles.contains(Role.BOT);
@@ -165,10 +184,7 @@ public record EarlyBirdProperties(
         if (dbSchema == null || !SQL_IDENTIFIER.matcher(dbSchema).matches()) {
             p.add("DB_SCHEMA must be a lowercase SQL identifier (e.g. earlybird_dev)");
         }
-        boolean httpUrl = publicBaseUrl != null
-                && publicBaseUrl.isAbsolute()
-                && ("http".equals(publicBaseUrl.getScheme()) || "https".equals(publicBaseUrl.getScheme()))
-                && publicBaseUrl.getHost() != null;
+        boolean httpUrl = isHttpUrl(publicBaseUrl);
         if (!httpUrl) {
             p.add("PUBLIC_BASE_URL must be an absolute http(s) URL (e.g. http://localhost:8080)");
         }
@@ -251,6 +267,16 @@ public record EarlyBirdProperties(
         }
         if (alerts.defaultDailyCap() < 1 || alerts.defaultDailyCap() > 100) {
             p.add("ALERT_DEFAULT_DAILY_CAP must be between 1 and 100");
+        }
+
+        // Job sources
+        if (roles.contains(Role.POLLER)) {
+            for (URI url : Arrays.asList(
+                    sources.greenhouseBaseUrl(), sources.leverBaseUrl(), sources.ashbyBaseUrl())) {
+                if (!isHttpUrl(url)) {
+                    p.add("earlybird.sources base URLs must be absolute http(s) URLs, got " + url);
+                }
+            }
         }
         return p;
     }

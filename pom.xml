@@ -27,6 +27,8 @@
     <properties>
         <java.version>25</java.version>
         <java-uuid-generator.version>5.2.0</java-uuid-generator.version>
+        <jsoup.version>1.24.1</jsoup.version>
+        <wiremock.version>3.13.2</wiremock.version>
         <jacoco.version>0.8.16</jacoco.version>
     </properties>
 
@@ -74,7 +76,20 @@
             <version>${java-uuid-generator.version}</version>
         </dependency>
 
+        <!-- HTML job descriptions to plain text -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
+        </dependency>
+
         <!-- Tests -->
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>${wiremock.version}</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webmvc-test</artifactId>
