@@ -29,8 +29,25 @@ public final class MutableClock extends Clock {
         return ZoneOffset.UTC;
     }
 
+    /** A view in another zone that follows this clock: advancing this clock moves the view too. */
     @Override
     public Clock withZone(ZoneId zone) {
-        throw new UnsupportedOperationException("MutableClock is always UTC");
+        MutableClock source = this;
+        return new Clock() {
+            @Override
+            public Instant instant() {
+                return source.instant();
+            }
+
+            @Override
+            public ZoneId getZone() {
+                return zone;
+            }
+
+            @Override
+            public Clock withZone(ZoneId other) {
+                return source.withZone(other);
+            }
+        };
     }
 }
