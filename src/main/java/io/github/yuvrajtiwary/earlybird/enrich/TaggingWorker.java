@@ -23,6 +23,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -36,9 +37,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>Per batch: Gemini; postings it didn't answer for are retried once in a half-size batch; whatever is
  * still missing, or everything if Gemini is down or the budget is spent, goes to the keyword tagger. Tags
- * and the cleared description are written in one transaction, then PostingEnriched is published.
+ * and the cleared description are written in one transaction, then PostingEnriched is published (and marked
+ * published once the bus has it; if not, the outbox relay publishes it later).
  */
-public class TaggingWorker implements SmartLifecycle {
+public class TaggingWorker implements InitializingBean, SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(TaggingWorker.class);
 
@@ -86,9 +88,17 @@ public class TaggingWorker implements SmartLifecycle {
         return autoStart;
     }
 
+    /**
+     * Subscribed while the context starts, like every consumer, so the Kafka bus starts one consumer per group
+     * with all its topics. The event is only a doorbell: the database is the queue (see the class comment).
+     */
+    @Override
+    public void afterPropertiesSet() {
+        bus.subscribe(Topic.JOBS_DISCOVERED, "eb-enricher", PostingDiscovered.class, event -> doorbell.release());
+    }
+
     @Override
     public void start() {
-        bus.subscribe(Topic.JOBS_DISCOVERED, "eb-enricher", PostingDiscovered.class, event -> doorbell.release());
         running = true;
         thread = Thread.ofVirtual().name("tagging-worker").start(this::loop);
     }
@@ -167,20 +177,17 @@ public class TaggingWorker implements SmartLifecycle {
         log.info("Tagged {} postings ({} by Gemini)", batch.size(), result.size());
     }
 
+    /** Outbox-lite: marked published only once the bus has the event; otherwise the relay publishes it later. */
     private void publish(PostingTags t) {
-        var payload = new PostingEnriched(t.postingId(), db(t.roleCategory()), db(t.seniority()), t.minYears(),
-                t.maxYears(), t.fresherFriendly(), db(t.employmentType()), db(t.workMode()), db(t.remoteScope()),
-                t.cities(), t.countries(), t.skills(), db(t.tagger()));
         try {
-            bus.publish(Topic.JOBS_ENRICHED, t.postingId().toString(), EventEnvelope.of(payload, "enricher", clock))
-                    .get(15, TimeUnit.SECONDS);
+            bus.publish(Topic.JOBS_ENRICHED, t.postingId().toString(),
+                    EventEnvelope.of(PostingEnriched.of(t), "enricher", clock)).get(15, TimeUnit.SECONDS);
+            tags.markPublished(List.of(t.postingId()), clock.instant());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         } catch (Exception e) {
-            log.warn("Could not publish PostingEnriched for {}: {}", t.postingId(), e.toString());
+            log.warn("Could not publish PostingEnriched for {} (the outbox relay will): {}", t.postingId(), e.toString());
         }
-    }
-
-    private static String db(Enum<?> e) {
-        return e.name().toLowerCase(Locale.ROOT);
     }
 
     private static void sleepQuietly(Duration d) {

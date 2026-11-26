@@ -176,11 +176,8 @@ public class BoardChecker {
             if (!BoardDiffer.shouldPublish(p.baseline(), p.repost(), p.sourcePublishedAt(), p.firstSeenAt())) {
                 continue;
             }
-            var payload = new PostingDiscovered(p.id(), p.source().name().toLowerCase(Locale.ROOT), board.token(),
-                    p.company(), p.externalId(), p.title(), p.url(), p.locationRaw(), p.departments(),
-                    p.sourcePublishedAt(), p.firstSeenAt(), p.contentHash(), p.descriptionText(), p.baseline());
             sends.put(p.id(), bus.publish(Topic.JOBS_DISCOVERED, p.id().toString(),
-                    EventEnvelope.of(payload, PRODUCER, clock)));
+                    EventEnvelope.of(PostingDiscovered.of(p, board.token()), PRODUCER, clock)));
         }
         List<UUID> accepted = new ArrayList<>();
         sends.forEach((id, send) -> {

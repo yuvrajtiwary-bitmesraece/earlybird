@@ -200,6 +200,25 @@ public class AlertRepository {
         }
     }
 
+    /**
+     * Outbox-lite: instant alerts created in [{@code createdAfter}, {@code createdBefore}) that are still queued,
+     * so their delivery request was lost or never published. Oldest first.
+     */
+    public List<Alert> findQueuedInstant(Instant createdBefore, Instant createdAfter, int limit) {
+        return jdbc.sql("""
+                        select * from alerts
+                        where status = 'queued' and mode = 'instant'
+                          and created_at < :before and created_at >= :after
+                        order by created_at
+                        limit :limit
+                        """)
+                .param("before", Sql.ts(createdBefore))
+                .param("after", Sql.ts(createdAfter))
+                .param("limit", limit)
+                .query(AlertRepository::map)
+                .list();
+    }
+
     public Optional<Alert> findById(UUID id) {
         return jdbc.sql("select * from alerts where id = :id").param("id", id).query(AlertRepository::map).optional();
     }

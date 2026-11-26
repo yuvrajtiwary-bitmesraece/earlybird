@@ -2,6 +2,7 @@ package io.github.yuvrajtiwary.earlybird.poller;
 
 import io.github.yuvrajtiwary.earlybird.config.ConditionalOnRole;
 import io.github.yuvrajtiwary.earlybird.config.Role;
+import io.github.yuvrajtiwary.earlybird.events.OutboxRelay;
 import io.github.yuvrajtiwary.earlybird.persistence.Board;
 import io.github.yuvrajtiwary.earlybird.persistence.BoardRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.TickRepository;
@@ -20,7 +21,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * One poller tick: check every enabled board (spec v1: all boards, every tick) and record the outcome.
+ * One poller tick: check every enabled board (spec v1: all boards, every tick), record the outcome, then run the
+ * outbox relay, which publishes events that didn't reach the bus earlier.
  * Boards are checked in parallel on virtual threads, at most {@value #MAX_CONCURRENT_BOARDS} at a time so
  * the 5-connection database pool and 512 MB of memory aren't overwhelmed. One board failing, even with an
  * unexpected exception, never stops the others.
@@ -46,14 +48,16 @@ public class TickService {
     private final BoardRepository boards;
     private final TickRepository ticks;
     private final BoardChecker checker;
+    private final OutboxRelay relay;
     private final Clock clock;
     private final MeterRegistry meters;
 
-    public TickService(BoardRepository boards, TickRepository ticks, BoardChecker checker, Clock clock,
-            MeterRegistry meters) {
+    public TickService(BoardRepository boards, TickRepository ticks, BoardChecker checker, OutboxRelay relay,
+            Clock clock, MeterRegistry meters) {
         this.boards = boards;
         this.ticks = ticks;
         this.checker = checker;
+        this.relay = relay;
         this.clock = clock;
         this.meters = meters;
     }
@@ -83,6 +87,11 @@ public class TickService {
                 Duration.between(started, finished), status);
         log.info("Tick {}: {} boards ({} unchanged, {} failed), {} new postings, {} closed, {} ms",
                 tickId, summary.boardsChecked(), unchanged, failed, newPostings, closed, summary.took().toMillis());
+        try {
+            relay.run();
+        } catch (RuntimeException e) {
+            log.error("Outbox relay failed; it runs again next tick", e); // the tick itself succeeded
+        }
         return summary;
     }
 

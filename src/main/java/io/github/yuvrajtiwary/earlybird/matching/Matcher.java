@@ -125,7 +125,7 @@ public class Matcher implements InitializingBean, RecentMatches {
             if (alerts.insertIfAbsent(alert)) {
                 meters.counter("earlybird.alerts", "mode", mode.name().toLowerCase(), "result", "created").increment();
                 if (mode == Alert.Mode.INSTANT) {
-                    instant.add(requestFor(alert, false));
+                    instant.add(AlertRequested.of(alert, false));
                 }
             }
         }
@@ -154,7 +154,7 @@ public class Matcher implements InitializingBean, RecentMatches {
         for (Pick c : best) {
             Alert alert = newAlert(userId, c.posting().posting().id(), c.match(), Alert.Mode.INSTANT, now);
             if (alerts.insertIfAbsent(alert)) {
-                request(requestFor(alert, true), null);
+                request(AlertRequested.of(alert, true), null);
                 sent++;
             }
         }
@@ -166,16 +166,12 @@ public class Matcher implements InitializingBean, RecentMatches {
                 Alert.Status.QUEUED, now, null, null, null, null);
     }
 
-    private static AlertRequested requestFor(Alert a, boolean recent) {
-        return new AlertRequested(a.id(), a.userId(), a.postingId(), a.score(), a.matchedSkills(), a.missingSkills(), recent);
-    }
-
     private void request(AlertRequested request, EventEnvelope<?> cause) {
         var envelope = cause == null ? EventEnvelope.of(request, "matcher", clock) : cause.derive(request, "matcher", clock);
         try {
             bus.publish(Topic.ALERTS_REQUESTED, String.valueOf(request.userId()), envelope).get(15, TimeUnit.SECONDS);
         } catch (Exception e) {
-            // The alert row stays 'queued'; Block 5's relay re-requests queued instant alerts older than 2 minutes.
+            // The alert row stays 'queued'; the outbox relay re-requests queued instant alerts after 2 minutes.
             log.warn("Could not request delivery of alert {}: {}", request.alertId(), e.toString());
         }
     }

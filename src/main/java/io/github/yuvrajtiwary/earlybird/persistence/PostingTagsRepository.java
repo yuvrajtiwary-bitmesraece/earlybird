@@ -7,6 +7,9 @@ import io.github.yuvrajtiwary.earlybird.persistence.PostingTags.Tagger;
 import io.github.yuvrajtiwary.earlybird.persistence.PostingTags.WorkMode;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -45,7 +48,8 @@ public class PostingTagsRepository {
                             summary = excluded.summary,
                             tagger = excluded.tagger,
                             model = excluded.model,
-                            enriched_at = excluded.enriched_at
+                            enriched_at = excluded.enriched_at,
+                            event_published_at = null
                         """)
                 .param("postingId", t.postingId())
                 .param("roleCategory", Sql.db(t.roleCategory()))
@@ -63,6 +67,35 @@ public class PostingTagsRepository {
                 .param("tagger", Sql.db(t.tagger()))
                 .param("model", t.model())
                 .param("enrichedAt", Sql.ts(t.enrichedAt()))
+                .update();
+    }
+
+    /**
+     * Outbox-lite: tags written in [{@code enrichedAfter}, {@code enrichedBefore}) whose PostingEnriched the bus
+     * never accepted, oldest first.
+     */
+    public List<PostingTags> findUnpublished(Instant enrichedBefore, Instant enrichedAfter, int limit) {
+        return jdbc.sql("""
+                        select * from posting_tags
+                        where event_published_at is null and enriched_at < :before and enriched_at >= :after
+                        order by enriched_at
+                        limit :limit
+                        """)
+                .param("before", Sql.ts(enrichedBefore))
+                .param("after", Sql.ts(enrichedAfter))
+                .param("limit", limit)
+                .query(PostingTagsRepository::map)
+                .list();
+    }
+
+    /** Called only after the event bus accepted these postings' PostingEnriched events. */
+    public int markPublished(Collection<UUID> postingIds, Instant now) {
+        if (postingIds.isEmpty()) {
+            return 0;
+        }
+        return jdbc.sql("update posting_tags set event_published_at = :now where posting_id = any(cast(:ids as uuid[]))")
+                .param("now", Sql.ts(now))
+                .param("ids", postingIds.stream().map(UUID::toString).toArray(String[]::new))
                 .update();
     }
 

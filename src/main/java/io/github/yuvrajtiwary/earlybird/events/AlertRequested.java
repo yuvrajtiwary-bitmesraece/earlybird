@@ -1,5 +1,6 @@
 package io.github.yuvrajtiwary.earlybird.events;
 
+import io.github.yuvrajtiwary.earlybird.persistence.Alert;
 import java.util.List;
 import java.util.UUID;
 
@@ -10,4 +11,10 @@ import java.util.UUID;
  */
 public record AlertRequested(
         UUID alertId, long userId, UUID postingId, int score, List<String> matchedSkills, List<String> missingSkills,
-        boolean recent) {}
+        boolean recent) {
+
+    public static AlertRequested of(Alert a, boolean recent) {
+        return new AlertRequested(a.id(), a.userId(), a.postingId(), a.score(), a.matchedSkills(), a.missingSkills(),
+                recent);
+    }
+}

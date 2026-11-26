@@ -193,6 +193,30 @@ public class PostingRepository {
                 .single();
     }
 
+    /** A posting whose PostingDiscovered never reached the bus, with its board's token (part of the event). */
+    public record Unpublished(Posting posting, String boardToken) {}
+
+    /**
+     * Outbox-lite: postings first seen in [{@code seenAfter}, {@code seenBefore}) that still wait to be tagged and
+     * whose PostingDiscovered the bus never accepted, oldest first. Postings already tagged are left out: their
+     * event would announce work that is done.
+     */
+    public List<Unpublished> findUnpublished(Instant seenBefore, Instant seenAfter, int limit) {
+        return jdbc.sql("""
+                        select p.*, b.token as board_token
+                        from postings p join boards b on b.id = p.board_id
+                        where p.event_published_at is null and p.description_text is not null
+                          and p.first_seen_at < :before and p.first_seen_at >= :after
+                        order by p.first_seen_at
+                        limit :limit
+                        """)
+                .param("before", Sql.ts(seenBefore))
+                .param("after", Sql.ts(seenAfter))
+                .param("limit", limit)
+                .query((rs, row) -> new Unpublished(map(rs, row), rs.getString("board_token")))
+                .list();
+    }
+
     /** Outbox-lite: called only after the event bus accepted the PostingDiscovered events. */
     public int markPublished(Collection<UUID> ids, Instant now) {
         if (ids.isEmpty()) {
