@@ -3,10 +3,10 @@ package io.github.yuvrajtiwary.earlybird.alerts;
 import io.github.yuvrajtiwary.earlybird.common.RateLimiter;
 import io.github.yuvrajtiwary.earlybird.common.RateLimiter.Bandwidth;
 import io.github.yuvrajtiwary.earlybird.events.AlertRequested;
+import io.github.yuvrajtiwary.earlybird.events.DeadLetterException;
 import io.github.yuvrajtiwary.earlybird.events.EventBus;
 import io.github.yuvrajtiwary.earlybird.events.EventEnvelope;
 import io.github.yuvrajtiwary.earlybird.events.Topic;
-import io.github.yuvrajtiwary.earlybird.ops.AdminNotifier;
 import io.github.yuvrajtiwary.earlybird.persistence.Alert;
 import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository.Delivery;
@@ -35,7 +35,7 @@ import org.springframework.beans.factory.InitializingBean;
  *   <li>claim it ({@code queued → sending}): only one delivery can win, so it's never sent twice;
  *   <li>pace: 25 messages/s overall (inside the Telegram client) and 1 per second per chat;
  *   <li>send, then {@code sent}. 429 waits {@code retry_after}; 403 means the user blocked us; 5xx and network
- *       errors are retried; any other 4xx fails the alert.
+ *       errors are retried; any other 4xx fails the alert and dead-letters the event, which tells the admin.
  * </ol>
  */
 public class Notifier implements InitializingBean {
@@ -52,15 +52,14 @@ public class Notifier implements InitializingBean {
     private final DailyCaps caps;
     private final AlertFormatter formatter;
     private final EventBus bus;
-    private final AdminNotifier admin;
     private final Clock clock;
     private final MeterRegistry meters;
     private final List<Duration> backoff;
     private final Timer deliveryLag;
 
     public Notifier(AlertRepository alerts, UserRepository users, TelegramApi telegram, RateLimiter perChat,
-            DailyCaps caps, AlertFormatter formatter, EventBus bus, AdminNotifier admin, Clock clock,
-            MeterRegistry meters, List<Duration> backoff) {
+            DailyCaps caps, AlertFormatter formatter, EventBus bus, Clock clock, MeterRegistry meters,
+            List<Duration> backoff) {
         this.alerts = alerts;
         this.users = users;
         this.telegram = telegram;
@@ -68,7 +67,6 @@ public class Notifier implements InitializingBean {
         this.caps = caps;
         this.formatter = formatter;
         this.bus = bus;
-        this.admin = admin;
         this.clock = clock;
         this.meters = meters;
         this.backoff = List.copyOf(backoff);
@@ -86,7 +84,11 @@ public class Notifier implements InitializingBean {
         deliver(event.payload().alertId(), event.payload().recent());
     }
 
-    /** @return what happened, for tests and logs */
+    /**
+     * @return what happened, for tests and logs
+     * @throws DeadLetterException if Telegram rejected the alert for good (a 4xx other than 403 and 429), after
+     *     marking it failed: the spec sends such events to the dead-letter topic
+     */
     public Alert.Status deliver(UUID alertId, boolean recent) {
         Optional<Delivery> found = alerts.findDelivery(alertId);
         if (found.isEmpty()) {
@@ -134,9 +136,9 @@ public class Notifier implements InitializingBean {
                 }
                 boolean retryable = e.errorCode() == 429 || e.errorCode() == 0 || e.errorCode() >= 500;
                 if (!retryable) {
-                    log.error("Alert {} rejected by Telegram: {}", id, e.getMessage());
-                    admin.notifyOncePerDay("alert-rejected", "Telegram rejected an alert: " + e.getMessage());
-                    return finish(id, Alert.Status.FAILED, "rejected");
+                    finish(id, Alert.Status.FAILED, "rejected");
+                    // Retrying can't help, so the event goes to the dead-letter topic now; that tells the admin.
+                    throw new DeadLetterException("Telegram rejected alert " + id + ": " + e.getMessage());
                 }
                 if (attempt < MAX_ATTEMPTS) {
                     sleep(e.retryAfter() != null ? e.retryAfter() : backoff.get(Math.min(attempt - 1, backoff.size() - 1)));

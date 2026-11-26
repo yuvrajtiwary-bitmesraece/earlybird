@@ -2,7 +2,9 @@ package io.github.yuvrajtiwary.earlybird.telegram;
 
 import io.github.yuvrajtiwary.earlybird.common.RateLimiter;
 import io.github.yuvrajtiwary.earlybird.common.RateLimiter.Bandwidth;
+import io.github.yuvrajtiwary.earlybird.common.redis.RedisGuard;
 import io.github.yuvrajtiwary.earlybird.enrich.GeminiBudget;
+import io.github.yuvrajtiwary.earlybird.events.KafkaMonitor;
 import io.github.yuvrajtiwary.earlybird.ops.DistributedLock;
 import io.github.yuvrajtiwary.earlybird.ops.InternalScheduler;
 import io.github.yuvrajtiwary.earlybird.persistence.OpsStatsRepository;
@@ -18,10 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 
-/**
- * Commands only {@code ADMIN_TELEGRAM_CHAT_ID} can use (spec 3.11). Kafka, Redis and dead-letter status
- * join {@code /admin} when those exist (Blocks 4-5).
- */
+/** Commands only {@code ADMIN_TELEGRAM_CHAT_ID} can use (spec 3.11). */
 class AdminCommands {
 
     private static final Logger log = LoggerFactory.getLogger(AdminCommands.class);
@@ -31,16 +30,21 @@ class AdminCommands {
     private final OpsStatsRepository stats;
     private final ObjectProvider<GeminiBudget> budget;
     private final ObjectProvider<TickService> ticks;
+    private final ObjectProvider<KafkaMonitor> kafka;
+    private final ObjectProvider<RedisGuard> redis;
     private final DistributedLock lock;
     private final RateLimiter rateLimiter;
     private final Clock clock;
 
     AdminCommands(TelegramApi api, OpsStatsRepository stats, ObjectProvider<GeminiBudget> budget,
-            ObjectProvider<TickService> ticks, DistributedLock lock, RateLimiter rateLimiter, Clock clock) {
+            ObjectProvider<TickService> ticks, ObjectProvider<KafkaMonitor> kafka, ObjectProvider<RedisGuard> redis,
+            DistributedLock lock, RateLimiter rateLimiter, Clock clock) {
         this.api = api;
         this.stats = stats;
         this.budget = budget;
         this.ticks = ticks;
+        this.kafka = kafka;
+        this.redis = redis;
         this.lock = lock;
         this.rateLimiter = rateLimiter;
         this.clock = clock;
@@ -66,6 +70,17 @@ class AdminCommands {
             text.append("<b>Gemini calls left today:</b> ").append(gemini.remainingToday()).append(" of ")
                     .append(gemini.maxPerDay()).append("\n");
         }
+        KafkaMonitor monitor = kafka.getIfAvailable();
+        if (monitor == null) {
+            text.append("<b>Kafka:</b> not used (in-process event bus)\n");
+        } else {
+            text.append("<b>Kafka:</b> ").append(monitor.summary());
+            monitor.deadLetters().ifPresent(n -> text.append(" · ").append(n).append(n == 1 ? " dead letter" : " dead letters"));
+            text.append("\n");
+        }
+        RedisGuard guard = redis.getIfAvailable();
+        text.append("<b>Redis:</b> ").append(guard == null ? "not configured (in-memory fallbacks)"
+                : guard.coolingDown() ? "unreachable, using fallbacks" : "OK").append("\n");
         api.sendMessage(chatId, text.toString(), null);
     }
 

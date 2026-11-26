@@ -2,11 +2,13 @@ package io.github.yuvrajtiwary.earlybird.telegram;
 
 import io.github.yuvrajtiwary.earlybird.common.RateLimiter;
 import io.github.yuvrajtiwary.earlybird.common.redis.RedisConfig;
+import io.github.yuvrajtiwary.earlybird.common.redis.RedisGuard;
 import org.springframework.beans.factory.annotation.Qualifier;
 import io.github.yuvrajtiwary.earlybird.config.ConditionalOnRole;
 import io.github.yuvrajtiwary.earlybird.config.EarlyBirdProperties;
 import io.github.yuvrajtiwary.earlybird.config.Role;
 import io.github.yuvrajtiwary.earlybird.enrich.GeminiBudget;
+import io.github.yuvrajtiwary.earlybird.events.KafkaMonitor;
 import io.github.yuvrajtiwary.earlybird.ops.DistributedLock;
 import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.BotSessionRepository;
@@ -68,8 +70,9 @@ class TelegramConfig {
 
         @Bean
         AdminCommands adminCommands(TelegramApi api, OpsStatsRepository stats, ObjectProvider<GeminiBudget> budget,
-                ObjectProvider<TickService> ticks, DistributedLock lock, RateLimiter rateLimiter, Clock clock) {
-            return new AdminCommands(api, stats, budget, ticks, lock, rateLimiter, clock);
+                ObjectProvider<TickService> ticks, ObjectProvider<KafkaMonitor> kafka, ObjectProvider<RedisGuard> redis,
+                DistributedLock lock, RateLimiter rateLimiter, Clock clock) {
+            return new AdminCommands(api, stats, budget, ticks, kafka, redis, lock, rateLimiter, clock);
         }
 
         @Bean

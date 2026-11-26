@@ -6,7 +6,6 @@ import io.github.yuvrajtiwary.earlybird.config.ConditionalOnRole;
 import io.github.yuvrajtiwary.earlybird.config.EarlyBirdProperties;
 import io.github.yuvrajtiwary.earlybird.config.Role;
 import io.github.yuvrajtiwary.earlybird.events.EventBus;
-import io.github.yuvrajtiwary.earlybird.ops.AdminNotifier;
 import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.UserRepository;
 import io.github.yuvrajtiwary.earlybird.telegram.api.TelegramApi;
@@ -37,8 +36,8 @@ class AlertsConfig {
 
     @Bean
     Notifier notifier(AlertRepository alerts, UserRepository users, TelegramApi telegram, RateLimiter localRateLimiter,
-            DailyCaps caps, AlertFormatter formatter, EventBus bus, AdminNotifier admin, Clock clock, MeterRegistry meters) {
-        return new Notifier(alerts, users, telegram, localRateLimiter, caps, formatter, bus, admin, clock, meters,
+            DailyCaps caps, AlertFormatter formatter, EventBus bus, Clock clock, MeterRegistry meters) {
+        return new Notifier(alerts, users, telegram, localRateLimiter, caps, formatter, bus, clock, meters,
                 List.of(Duration.ofSeconds(1), Duration.ofSeconds(5)));
     }
 

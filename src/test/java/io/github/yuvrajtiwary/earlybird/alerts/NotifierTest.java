@@ -1,6 +1,7 @@
 package io.github.yuvrajtiwary.earlybird.alerts;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -15,8 +16,8 @@ import static org.mockito.Mockito.when;
 
 import io.github.yuvrajtiwary.earlybird.common.Ids;
 import io.github.yuvrajtiwary.earlybird.common.TokenBucketRateLimiter;
+import io.github.yuvrajtiwary.earlybird.events.DeadLetterException;
 import io.github.yuvrajtiwary.earlybird.events.EventBus;
-import io.github.yuvrajtiwary.earlybird.ops.AdminNotifier;
 import io.github.yuvrajtiwary.earlybird.persistence.Alert;
 import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository.Delivery;
@@ -41,9 +42,8 @@ class NotifierTest {
     private final UserRepository users = mock(UserRepository.class);
     private final TelegramApi telegram = mock(TelegramApi.class);
     private final DailyCaps caps = mock(DailyCaps.class);
-    private final AdminNotifier admin = mock(AdminNotifier.class);
     private final Notifier notifier = new Notifier(alerts, users, telegram, new TokenBucketRateLimiter(Clock.systemUTC()),
-            caps, new AlertFormatter(""), mock(EventBus.class), admin, Clock.systemUTC(), new SimpleMeterRegistry(),
+            caps, new AlertFormatter(""), mock(EventBus.class), Clock.systemUTC(), new SimpleMeterRegistry(),
             List.of(Duration.ZERO));
 
     private final UUID id = Ids.newId();
@@ -135,15 +135,18 @@ class NotifierTest {
         verify(telegram, times(3)).sendMessage(eq(42L), anyString(), any());
     }
 
+    /** Spec 3.10: "other 4xx: mark failed and send to the DLQ". The dead letter is what tells the admin. */
     @Test
-    void otherClientErrorsFailTheAlertAndTellTheAdmin() {
+    void otherClientErrorsFailTheAlertAndDeadLetterTheEvent() {
         given(Alert.Status.QUEUED, User.Status.ACTIVE, null);
         when(telegram.sendMessage(eq(42L), anyString(), any()))
                 .thenThrow(new TelegramException(400, "Bad Request: can't parse entities", null));
 
-        assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.FAILED);
-        verify(telegram, times(1)).sendMessage(eq(42L), anyString(), any());
-        verify(admin).notifyOncePerDay(eq("alert-rejected"), anyString());
+        assertThatThrownBy(() -> notifier.deliver(id, false))
+                .isInstanceOf(DeadLetterException.class)
+                .hasMessageContaining("Bad Request: can't parse entities");
+        verify(alerts).markStatus(id, Alert.Status.FAILED);
+        verify(telegram, times(1)).sendMessage(eq(42L), anyString(), any()); // not retried
     }
 
     @Test
