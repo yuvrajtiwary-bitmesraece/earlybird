@@ -102,6 +102,34 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 - **Recent matches:** finishing onboarding or changing preferences sends the top 3 matches from the last 48 hours, so a new user doesn't start with silence.
 - **Redis is optional.** It holds the shared send rate, daily cap counters and a weekly "who's hiring freshers" ranking. With `REDIS_URL` empty, or Redis unreachable (then retried after 30 s), rates are limited in memory and caps are counted in Postgres.
 
+## Events and Kafka
+
+| Topic | Key | Producer → consumer group |
+|---|---|---|
+| `eb.jobs.discovered.v1` | posting id | poller → `eb-enricher` |
+| `eb.jobs.enriched.v1` | posting id | enricher → `eb-matcher` |
+| `eb.jobs.closed.v1` | posting id | poller → `eb-matcher` |
+| `eb.alerts.requested.v1` | user id (one user's alerts stay in order) | matcher → `eb-notifier` |
+| `eb.dlq.v1` | the original key | any consumer → `eb-admin` (admin notice) |
+
+- **One interface, two buses.** `EVENT_BUS=memory` (the local default: in-process, nothing to install) or `EVENT_BUS=kafka` (production, on Aiven's free plan). Modules only call `EventBus.publish` and `subscribe`.
+- **At-least-once delivery, no duplicates for users:**
+  - The producer waits for every in-sync replica (`acks=all`, idempotent, zstd).
+  - A consumer commits an event's offset only after its handler, and the handler's database transaction, has finished. After a crash the event comes again, and consumers skip what they've already handled: `processed_events` for the matcher, the alert's status for the notifier, the database queue for the tagger.
+- **Failures:** retried after 1 s, 5 s and 30 s, then written to `eb.dlq.v1` with the error, the attempt count and the original message (base64). Malformed events go there at once. The admin gets a Telegram notice (at most one per topic per day), and `/admin` shows the count.
+- **Outbox relay:** producers write Postgres first and mark a row published only once Kafka has confirmed its event. At the end of every tick the relay publishes whatever is still unmarked: postings and tags over a minute old, and instant alerts still queued after 2 minutes.
+- **When Kafka is down** (for example, Aiven powered the free service off), the app keeps running:
+  - Health says `DEGRADED` (HTTP 200). Readiness is unaffected, so the platform doesn't restart the app.
+  - Events wait in Postgres, and publishing fails at once instead of waiting on timeouts.
+  - The admin is told after 5 minutes, and the relay catches up when Kafka is back.
+- **Topics are created by hand** (auto-creation is off). Startup logs a clear error naming any that are missing.
+- **Setting up Aiven** (free, no card):
+  1. Create a Kafka service on the Free tier, and its five topics with 2 partitions each.
+  2. Download the CA certificate, access certificate and access key into a folder.
+  3. Put the service URI in `.env` as `KAFKA_BOOTSTRAP_SERVERS`.
+  4. Run `java scripts/KafkaPemsToEnv.java <folder>`. It checks the files belong together and writes them into `.env` as one-line PEM text (no keystore files), printing only OK/FAIL.
+- **Dev and prod share Aiven's single free service.** Outside production, consumer groups carry the environment's name (`dev.eb-matcher`), so a laptop can't take events away from production. Once production is live, run dev on the in-process bus anyway.
+
 ## Tests
 
 ```bash
@@ -109,7 +137,7 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 ```
 
 - **Unit tests** (`*Test`) always run.
-- **Integration tests** (`*IT`) start the whole app against a real Postgres in Docker (Testcontainers). Without Docker they are skipped, so they skip on a laptop without Docker and always run in CI. CI fails if they were skipped.
+- **Integration tests** (`*IT`) start the whole app against a real Postgres in Docker (Testcontainers), and `KafkaPipelineIT` adds a real Kafka (`apache/kafka`) with `EVENT_BUS=kafka`. Without Docker they are skipped, so they skip on a laptop without Docker and always run in CI. CI fails if they were skipped.
 - Coverage: `target/site/jacoco/index.html` (also uploaded by CI).
 
 ## Measured numbers
@@ -136,7 +164,7 @@ Production figures (Render, 0.1 CPU / 512 MB) will be added in Block 8.
 src/main/java/io/github/yuvrajtiwary/earlybird/
   config/       typed configuration, roles, @ConditionalOnRole
   common/       UUID v7 ids, rate limiter, city names, Redis guard and Redis rate limiter
-  events/       EventBus interface, envelope, in-memory bus, event payloads
+  events/       EventBus interface, envelope, in-memory and Kafka buses, Kafka monitor, outbox relay, payloads
   sources/      Greenhouse / Lever / Ashby clients, HTTP client, seed list, board validator
   poller/       per-board check (diff, baseline, reposts, empty guard), tick
   enrich/       Gemini client and daily budget, batch tagger, fallback tagger, tagging worker, skill vocabulary
@@ -151,6 +179,7 @@ src/main/resources/boards/         seed-boards.csv
 src/main/resources/skills.yaml     canonical skill names and aliases
 src/main/resources/prompts/        Gemini system instructions
 src/test/resources/fixtures/       real API responses used by the parser tests
+scripts/KafkaPemsToEnv.java        Aiven's certificate files → .env
 ```
 
 Later blocks add `web/`.
