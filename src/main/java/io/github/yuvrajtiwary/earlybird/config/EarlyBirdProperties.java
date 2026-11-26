@@ -1,6 +1,7 @@
 package io.github.yuvrajtiwary.earlybird.config;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -40,6 +41,7 @@ public record EarlyBirdProperties(
     private static final Pattern TOPIC_PREFIX = Pattern.compile("[a-zA-Z0-9._-]{0,100}");
     // Telegram's secret_token rules: 1-256 chars of A-Z a-z 0-9 _ -. We also require 32+ for strength.
     private static final Pattern WEBHOOK_SECRET = Pattern.compile("[A-Za-z0-9_-]{32,256}");
+    private static final List<String> SASL_MECHANISMS = List.of("SCRAM-SHA-256", "SCRAM-SHA-512", "PLAIN");
 
     public EarlyBirdProperties {
         roles = (roles == null || roles.isEmpty()) ? Set.of() : Collections.unmodifiableSet(EnumSet.copyOf(roles));
@@ -57,13 +59,24 @@ public record EarlyBirdProperties(
 
     public enum EventBusType { MEMORY, KAFKA }
 
-    public enum KafkaSecurity { SSL, SASL_SSL }
+    /** {@code PLAINTEXT} is for local and CI test brokers only; refused when {@code EARLYBIRD_ENV=prod}. */
+    public enum KafkaSecurity { SSL, SASL_SSL, PLAINTEXT }
 
     public enum TelegramMode { WEBHOOK, POLLING }
 
     public enum SchedulerMode { INTERNAL, EXTERNAL }
 
-    public record Events(EventBusType bus, String topicPrefix) {}
+    /**
+     * @param retryBackoff the waits between attempts at a failing event before it goes to the dead-letter topic
+     *                     (spec 3.2: 1 s, 5 s, 30 s, so 4 attempts in all); overridden only by tests
+     */
+    public record Events(
+            EventBusType bus, String topicPrefix, @DefaultValue({"1s", "5s", "30s"}) List<Duration> retryBackoff) {
+
+        public Events {
+            retryBackoff = retryBackoff == null ? List.of() : List.copyOf(retryBackoff);
+        }
+    }
 
     public record Kafka(
             String bootstrapServers,
@@ -242,7 +255,12 @@ public record EarlyBirdProperties(
                 p.add("KAFKA_BOOTSTRAP_SERVERS is required when EVENT_BUS=kafka");
             }
             if (kafka.securityProtocol() == null) {
-                p.add("KAFKA_SECURITY_PROTOCOL must be SSL or SASL_SSL");
+                p.add("KAFKA_SECURITY_PROTOCOL must be SSL or SASL_SSL (or PLAINTEXT for a local test broker)");
+            } else if (kafka.securityProtocol() == KafkaSecurity.PLAINTEXT) {
+                if ("prod".equals(env)) {
+                    p.add("KAFKA_SECURITY_PROTOCOL=PLAINTEXT sends events unencrypted and is only for local test"
+                            + " brokers; use SSL or SASL_SSL with EARLYBIRD_ENV=prod");
+                }
             } else {
                 if (blank(kafka.sslCaPem())) {
                     p.add("KAFKA_SSL_CA_PEM is required when EVENT_BUS=kafka");
@@ -256,6 +274,9 @@ public record EarlyBirdProperties(
                                 || blank(kafka.saslPassword()))) {
                     p.add("KAFKA_SASL_MECHANISM, KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD are required"
                             + " when KAFKA_SECURITY_PROTOCOL=SASL_SSL");
+                } else if (kafka.securityProtocol() == KafkaSecurity.SASL_SSL
+                        && !SASL_MECHANISMS.contains(kafka.saslMechanism().strip().toUpperCase(java.util.Locale.ROOT))) {
+                    p.add("KAFKA_SASL_MECHANISM must be one of " + SASL_MECHANISMS);
                 }
             }
         }

@@ -6,6 +6,7 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 import io.github.yuvrajtiwary.earlybird.config.EarlyBirdProperties.EventBusType;
 import io.github.yuvrajtiwary.earlybird.config.EarlyBirdProperties.SchedulerMode;
 import io.github.yuvrajtiwary.earlybird.config.EarlyBirdProperties.TelegramMode;
+import java.time.Duration;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -123,6 +124,14 @@ class EarlyBirdPropertiesTest {
                         new String[] {kafka, servers, ca, "earlybird.kafka.security-protocol=SASL_SSL",
                             "earlybird.kafka.sasl-username=avnadmin"},
                         "KAFKA_SASL_PASSWORD"),
+                arguments("Kafka SASL with an unknown mechanism",
+                        new String[] {kafka, servers, ca, "earlybird.kafka.security-protocol=SASL_SSL",
+                            "earlybird.kafka.sasl-username=avnadmin", "earlybird.kafka.sasl-password=secret",
+                            "earlybird.kafka.sasl-mechanism=GSSAPI"},
+                        "KAFKA_SASL_MECHANISM must be one of"),
+                arguments("unencrypted Kafka in production",
+                        new String[] {kafka, servers, "earlybird.env=prod", "earlybird.kafka.security-protocol=PLAINTEXT"},
+                        "PLAINTEXT"),
                 arguments("bad topic prefix", new String[] {"earlybird.events.topic-prefix=eb/"},
                         "KAFKA_TOPIC_PREFIX"),
                 arguments("external scheduler without QStash keys",
@@ -137,6 +146,14 @@ class EarlyBirdPropertiesTest {
     @MethodSource("invalidConfigurations")
     void rejectsInvalidConfiguration(String description, String[] overrides, String expectedMessage) {
         runner(overrides).run(ctx -> assertThat(ctx).getFailure().rootCause().hasMessageContaining(expectedMessage));
+    }
+
+    /** Test brokers (Testcontainers, docker-compose) speak PLAINTEXT; anything but prod may use one. */
+    @Test
+    void acceptsPlaintextKafkaOutsideProduction() {
+        runner("earlybird.events.bus=kafka", "earlybird.kafka.bootstrap-servers=localhost:9092",
+                        "earlybird.kafka.security-protocol=PLAINTEXT")
+                .run(ctx -> assertThat(ctx).hasNotFailed());
     }
 
     @Test
@@ -186,6 +203,8 @@ class EarlyBirdPropertiesTest {
                     // Defaults for everything not set
                     assertThat(p.events().bus()).isEqualTo(EventBusType.MEMORY);
                     assertThat(p.events().topicPrefix()).isEqualTo("eb.");
+                    assertThat(p.events().retryBackoff()).containsExactly(
+                            Duration.ofSeconds(1), Duration.ofSeconds(5), Duration.ofSeconds(30));
                     assertThat(p.gemini().model()).isEqualTo("gemini-3.5-flash-lite");
                     assertThat(p.alerts().defaultMinScore()).isEqualTo(55);
                     assertThat(p.scheduler().mode()).isEqualTo(SchedulerMode.INTERNAL);

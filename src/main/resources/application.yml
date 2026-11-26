@@ -40,6 +40,13 @@ server:
   port: ${PORT:8080}
   shutdown: graceful
 
+logging:
+  level:
+    # Kafka clients print their whole configuration at INFO and every failed reconnect at WARN; the KafkaMonitor
+    # reports an outage once instead.
+    org.apache.kafka: WARN
+    org.apache.kafka.clients.NetworkClient: ERROR
+
 management:
   health:
     redis:
@@ -54,6 +61,11 @@ management:
       probes:
         enabled: true
       show-details: never
+      status:
+        # DEGRADED = working, but something with a fallback is down (Kafka: events wait in Postgres). It ranks
+        # between OUT_OF_SERVICE and UP and keeps HTTP 200; readiness and liveness below never include Kafka, so a
+        # Kafka outage can't make the platform restart the app.
+        order: DOWN,OUT_OF_SERVICE,DEGRADED,UP,UNKNOWN
       group:
         # Ready = can serve traffic, so it includes the database. Live = the process isn't stuck; it must NOT
         # include the database, or a database outage would make the platform restart a healthy app in a loop.

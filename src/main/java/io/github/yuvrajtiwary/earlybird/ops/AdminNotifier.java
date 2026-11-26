@@ -1,5 +1,6 @@
 package io.github.yuvrajtiwary.earlybird.ops;
 
+import io.github.yuvrajtiwary.earlybird.common.AdminAlerts;
 import io.github.yuvrajtiwary.earlybird.telegram.api.TelegramApi;
 import io.github.yuvrajtiwary.earlybird.telegram.api.TelegramException;
 import java.time.Clock;
@@ -12,11 +13,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 
 /**
- * Tells the admin on Telegram when something needs attention (spec 3.11): the Gemini budget is used up, and
- * later dead letters, failing ticks, Kafka outages. Each kind of problem is sent at most once a day, so an
+ * Tells the admin on Telegram when something needs attention (spec 3.11): the Gemini budget is used up, dead
+ * letters, Kafka outages, and later failing ticks. Each kind of problem is sent at most once a day, so an
  * outage doesn't turn into a message flood. A process without the Telegram client only logs.
  */
-public class AdminNotifier {
+public class AdminNotifier implements AdminAlerts {
 
     private static final Logger log = LoggerFactory.getLogger(AdminNotifier.class);
     private static final ZoneId INDIA = ZoneId.of("Asia/Kolkata");
@@ -33,6 +34,7 @@ public class AdminNotifier {
     }
 
     /** Sends {@code html} unless a message with this {@code kind} already went out today (IST). */
+    @Override
     public void notifyOncePerDay(String kind, String html) {
         String key = kind + "@" + LocalDate.now(clock.withZone(INDIA));
         if (!sentToday.add(key)) {
