@@ -2,6 +2,7 @@ package io.github.yuvrajtiwary.earlybird.events;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -14,9 +15,12 @@ import io.github.yuvrajtiwary.earlybird.common.AdminAlerts;
 import io.github.yuvrajtiwary.earlybird.common.Ids;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import org.apache.kafka.clients.consumer.MockConsumer;
+import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.errors.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -82,6 +86,32 @@ class KafkaEventBusTest {
     void groupIdsAreTheSpecsInProductionAndPrefixedElsewhere() {
         assertThat(bus("prod").groupId("eb-matcher")).isEqualTo("eb-matcher");
         assertThat(bus("dev").groupId("eb-matcher")).isEqualTo("dev.eb-matcher");
+    }
+
+    /**
+     * Aiven powered off at boot: Kafka won't even create a consumer while the host doesn't resolve. The app must
+     * start anyway, and the group must start by itself once Kafka answers, without a restart.
+     */
+    @Test
+    void aGroupThatCouldNotStartStartsOnceKafkaAnswers() {
+        when(consumers.createConsumer(any(), any(), any(), any()))
+                .thenThrow(new KafkaException("Failed to construct kafka consumer"))
+                .thenAnswer(call -> new MockConsumer<String, byte[]>("earliest"));
+        KafkaEventBus bus = bus("dev");
+        bus.subscribe(Topic.JOBS_CLOSED, "eb-matcher", PostingClosed.class, e -> { });
+
+        bus.start();
+        try {
+            assertThat(bus.isRunning()).isTrue();
+            assertThat(bus.consumingGroups()).isEmpty();
+
+            monitor.probe(); // Kafka answers again
+
+            await().atMost(Duration.ofSeconds(10)).until(() -> bus.consumingGroups().equals(List.of("dev.eb-matcher")));
+        } finally {
+            bus.stop();
+        }
+        assertThat(bus.consumingGroups()).isEmpty();
     }
 
     @Test

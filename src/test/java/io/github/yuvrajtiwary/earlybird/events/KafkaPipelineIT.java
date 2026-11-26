@@ -97,6 +97,7 @@ class KafkaPipelineIT extends PipelineFixtures {
         }
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> assertThat(messagesToChat(KafkaIntegrationTest.ADMIN_CHAT))
                 .anySatisfy(m -> assertThat(m).contains("Dead letter", ENRICHED)));
+        assertThat(monitor.deadLetters().orElse(0)).as("the count /admin shows").isPositive();
 
         // The partition isn't stuck behind the poison: the next event on it is handled.
         var next = EventEnvelope.of(enrichedFor(UUID.randomUUID()), "it", Clock.systemUTC());

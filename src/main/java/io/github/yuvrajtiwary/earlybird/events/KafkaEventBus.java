@@ -162,6 +162,12 @@ public final class KafkaEventBus implements EventBus, SmartLifecycle {
         retry.forEach(p -> startContainer(p.consumerGroup(), p.topics()));
     }
 
+    /** Group ids that have a running consumer, for tests. */
+    List<String> consumingGroups() {
+        return containers.stream().filter(KafkaMessageListenerContainer::isRunning)
+                .map(KafkaMessageListenerContainer::getGroupId).toList();
+    }
+
     private static String rootCause(Throwable e) {
         Throwable cause = e;
         while (cause.getCause() != null && cause.getCause() != cause) {
