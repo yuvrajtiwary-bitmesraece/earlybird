@@ -25,7 +25,6 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,7 +37,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 @IntegrationTest
 class WebIT {
 
-    private static final AtomicLong IDS = new AtomicLong(7_000_000);
 
     @Autowired PublicStatsRepository stats;
     @Autowired PublicData data;
@@ -80,7 +78,8 @@ class WebIT {
     }
 
     private User newUser() {
-        long tg = IDS.incrementAndGet();
+        // A random id far from the ranges other tests count up from, since they share this database.
+        long tg = java.util.concurrent.ThreadLocalRandom.current().nextLong(5_000_000_000L, 6_000_000_000L);
         return users.create(tg, tg, "Web", null, Instant.now());
     }
 
