@@ -1,6 +1,8 @@
 package io.github.yuvrajtiwary.earlybird.poller;
 
 import io.github.yuvrajtiwary.earlybird.common.Ids;
+import io.github.yuvrajtiwary.earlybird.common.AdminAlerts;
+import io.github.yuvrajtiwary.earlybird.common.Html;
 import io.github.yuvrajtiwary.earlybird.config.ConditionalOnRole;
 import io.github.yuvrajtiwary.earlybird.config.Role;
 import io.github.yuvrajtiwary.earlybird.events.EventBus;
@@ -62,9 +64,10 @@ public class BoardChecker {
     private final TransactionTemplate transaction;
     private final Clock clock;
     private final MeterRegistry meters;
+    private final AdminAlerts admin;
 
     public BoardChecker(JobSources sources, BoardRepository boards, PostingRepository postings, EventBus bus,
-            TransactionTemplate transaction, Clock clock, MeterRegistry meters) {
+            TransactionTemplate transaction, Clock clock, MeterRegistry meters, AdminAlerts admin) {
         this.sources = sources;
         this.boards = boards;
         this.postings = postings;
@@ -72,6 +75,20 @@ public class BoardChecker {
         this.transaction = transaction;
         this.clock = clock;
         this.meters = meters;
+        this.admin = admin;
+    }
+
+    /** After recording a failure: if it was the 20th in a row, the board is now off; tell the admin. */
+    private void failed(Board board, boolean disabled, String error) {
+        if (disabled) {
+            log.warn("Board {} ({} {}) disabled after {} failed checks in a row", board.id(), board.source(),
+                    board.token(), BoardRepository.DISABLE_AFTER_FAILURES);
+            admin.notifyOncePerDay("board-disabled:" + board.id(), "Board disabled after "
+                    + BoardRepository.DISABLE_AFTER_FAILURES + " failed checks in a row: <b>"
+                    + Html.escape(board.company()) + "</b> (" + board.source().name().toLowerCase(Locale.ROOT) + " "
+                    + Html.escape(board.token()) + "): <code>" + Html.escape(String.valueOf(error))
+                    + "</code>\nMaintenance re-enables it if it answers again.");
+        }
     }
 
     public BoardCheckResult check(Board board) {
@@ -91,7 +108,7 @@ public class BoardChecker {
         try {
             fetched = source.fetch(board.token(), baseline ? null : board.etag(), baseline);
         } catch (SourceException e) {
-            boards.recordFailure(board.id(), now, e.getMessage());
+            failed(board, boards.recordFailure(board.id(), now, e.getMessage()), e.getMessage());
             return BoardCheckResult.failed(board, e.getMessage());
         }
         if (fetched instanceof FetchResult.NotModified) {
@@ -105,7 +122,7 @@ public class BoardChecker {
         if (BoardDiffer.isSuspiciousEmpty(board, jobs.size())) {
             String error = "listed 0 jobs after " + board.lastJobCount() + "; ignored ("
                     + (board.consecutiveEmptyChecks() + 1) + " of " + BoardDiffer.EMPTY_CHECKS_BEFORE_BELIEVED + ")";
-            boards.recordSuspiciousEmpty(board.id(), now, error);
+            failed(board, boards.recordSuspiciousEmpty(board.id(), now, error), error);
             return BoardCheckResult.suspiciousEmpty(board, error);
         }
 
@@ -118,7 +135,7 @@ public class BoardChecker {
                 fresh = source.describe(board.token(), fresh);
             } catch (SourceException e) {
                 // Nothing written yet, so next tick sees these jobs as new again and retries.
-                boards.recordFailure(board.id(), now, "describing new jobs: " + e.getMessage());
+                failed(board, boards.recordFailure(board.id(), now, "describing new jobs: " + e.getMessage()), e.getMessage());
                 return BoardCheckResult.failed(board, e.getMessage());
             }
         }

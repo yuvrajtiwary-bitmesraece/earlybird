@@ -51,6 +51,14 @@ public class TickRepository {
                 .update();
     }
 
+    /** The statuses of the latest {@code n} finished ticks, newest first. */
+    public java.util.List<Status> latestStatuses(int n) {
+        return jdbc.sql("select status from ticks where finished_at is not null order by started_at desc limit :n")
+                .param("n", n)
+                .query((rs, row) -> Status.valueOf(rs.getString(1).toUpperCase(java.util.Locale.ROOT)))
+                .list();
+    }
+
     public Optional<Tick> findById(long id) {
         return jdbc.sql("select * from ticks where id = :id")
                 .param("id", id)

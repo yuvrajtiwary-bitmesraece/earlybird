@@ -282,4 +282,43 @@ class RepositoriesIT {
         assertThat(opsStats.newPostingsSince(NOW.minusSeconds(1))).isPositive();
         assertThat(opsStats.alertsSince(Instant.EPOCH)).isNotNegative();
     }
+
+    /** Spec section 8: a failing board backs off (3, 6, 12… minutes, at most an hour) and is disabled at 20. */
+    @Test
+    void aFailingBoardBacksOffThenIsDisabled() {
+        Board board = newBoard();
+        Instant now = Instant.parse("2026-11-27T08:00:00Z");
+        long[] expectedWaits = {180, 360, 720, 1440, 2880, 3600, 3600};
+        for (long wait : expectedWaits) {
+            assertThat(boards.recordFailure(board.id(), now, "HTTP 503")).isFalse();
+            Board b = boards.findById(board.id()).orElseThrow();
+            assertThat(java.time.Duration.between(now, b.nextCheckAt()).toSeconds()).isEqualTo(wait);
+        }
+        assertThat(boards.findDue(now)).extracting(Board::id).doesNotContain(board.id());
+        assertThat(boards.findDue(now.plusSeconds(3600))).extracting(Board::id).contains(board.id());
+
+        for (int i = expectedWaits.length + 1; i < BoardRepository.DISABLE_AFTER_FAILURES; i++) {
+            assertThat(boards.recordFailure(board.id(), now, "HTTP 503")).isFalse();
+        }
+        assertThat(boards.recordFailure(board.id(), now, "HTTP 503")).as("the 20th failure").isTrue();
+        assertThat(boards.findById(board.id()).orElseThrow().enabled()).isFalse();
+        assertThat(boards.findDue(now.plusSeconds(86_400))).extracting(Board::id).doesNotContain(board.id());
+        assertThat(boards.findDisabled()).extracting(Board::id).contains(board.id());
+
+        boards.reEnable(board.id(), now);
+        Board back = boards.findById(board.id()).orElseThrow();
+        assertThat(back.enabled()).isTrue();
+        assertThat(back.consecutiveFailures()).isZero();
+        assertThat(boards.findDue(now)).extracting(Board::id).contains(board.id());
+    }
+
+    /** A board checked at :05 is due again at the next tick at :00, not the one after. */
+    @Test
+    void aBoardIsDueUpTo30SecondsEarly() {
+        Board board = newBoard();
+        Instant checked = Instant.parse("2026-11-27T10:00:05Z");
+        boards.recordNotModified(board.id(), checked); // next check at 10:03:05
+        assertThat(boards.findDue(Instant.parse("2026-11-27T10:03:00Z"))).extracting(Board::id).contains(board.id());
+        assertThat(boards.findDue(Instant.parse("2026-11-27T10:02:00Z"))).extracting(Board::id).doesNotContain(board.id());
+    }
 }

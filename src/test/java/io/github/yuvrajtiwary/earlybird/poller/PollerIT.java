@@ -198,19 +198,25 @@ class PollerIT {
     }
 
     @Test
-    void aTickChecksEveryEnabledBoardAndRecordsItself() {
+    void aTickChecksTheBoardsThatAreDueAndRecordsItself() {
         Board board = newBoard();
         stubBaseline(board, job("1", Duration.ofHours(1)));
-        int enabled = boards.findEnabled().size();
+        int due = boards.findDue(java.time.Instant.now()).size();
 
         TickService.TickSummary summary = ticks.runTick();
 
-        assertThat(summary.boardsChecked()).isEqualTo(enabled);
+        assertThat(summary.boardsChecked()).isEqualTo(due);
         assertThat(reload(board).lastSuccessAt()).isNotNull();
         TickRepository.Tick tick = tickRepository.findById(summary.tickId()).orElseThrow();
         assertThat(tick.finishedAt()).isNotNull();
-        assertThat(tick.boardsChecked()).isEqualTo(enabled);
+        assertThat(tick.boardsChecked()).isEqualTo(due);
         assertThat(tick.status()).isNotEqualTo(TickRepository.Status.RUNNING);
+
+        // Just checked, so not due again until its next slot: an immediate second tick leaves it alone.
+        java.time.Instant checkedAt = reload(board).lastCheckedAt();
+        ticks.runTick();
+        assertThat(reload(board).lastCheckedAt()).isEqualTo(checkedAt);
+        assertThat(boards.findDue(java.time.Instant.now())).extracting(Board::id).doesNotContain(board.id());
     }
 
     // -------------------------------------------------------------------------------------------- helpers

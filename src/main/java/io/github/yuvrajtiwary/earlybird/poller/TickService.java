@@ -1,5 +1,6 @@
 package io.github.yuvrajtiwary.earlybird.poller;
 
+import io.github.yuvrajtiwary.earlybird.common.AdminAlerts;
 import io.github.yuvrajtiwary.earlybird.config.ConditionalOnRole;
 import io.github.yuvrajtiwary.earlybird.config.Role;
 import io.github.yuvrajtiwary.earlybird.events.OutboxRelay;
@@ -21,8 +22,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * One poller tick: check every enabled board (spec v1: all boards, every tick), record the outcome, then run the
- * outbox relay, which publishes events that didn't reach the bus earlier.
+ * One poller tick: check every board that is due (failing boards back off), record the outcome, tell the admin
+ * if ticks keep failing or many boards do, then run the outbox relay, which publishes events that didn't reach
+ * the bus earlier.
  * Boards are checked in parallel on virtual threads, at most {@value #MAX_CONCURRENT_BOARDS} at a time so
  * the 5-connection database pool and 512 MB of memory aren't overwhelmed. One board failing, even with an
  * unexpected exception, never stops the others.
@@ -34,6 +36,9 @@ public class TickService {
     private static final Logger log = LoggerFactory.getLogger(TickService.class);
 
     static final int MAX_CONCURRENT_BOARDS = 8;
+    /** Spec 3.11: the admin hears about 3 failed ticks in a row, or more than 20% of boards failing. */
+    static final int FAILED_TICKS_ALERT = 3;
+    static final double FAILING_BOARDS_ALERT = 0.20;
 
     public record TickSummary(
             long tickId,
@@ -49,15 +54,17 @@ public class TickService {
     private final TickRepository ticks;
     private final BoardChecker checker;
     private final OutboxRelay relay;
+    private final AdminAlerts admin;
     private final Clock clock;
     private final MeterRegistry meters;
 
     public TickService(BoardRepository boards, TickRepository ticks, BoardChecker checker, OutboxRelay relay,
-            Clock clock, MeterRegistry meters) {
+            AdminAlerts admin, Clock clock, MeterRegistry meters) {
         this.boards = boards;
         this.ticks = ticks;
         this.checker = checker;
         this.relay = relay;
+        this.admin = admin;
         this.clock = clock;
         this.meters = meters;
     }
@@ -66,9 +73,7 @@ public class TickService {
         Instant started = clock.instant();
         Timer.Sample timer = Timer.start(meters);
         long tickId = ticks.start(started);
-        List<Board> enabled = boards.findEnabled();
-
-        List<BoardCheckResult> results = checkAll(enabled);
+        List<BoardCheckResult> results = checkAll(boards.findDue(started));
 
         int failed = (int) results.stream().filter(BoardCheckResult::failed).count();
         int unchanged = (int) results.stream()
@@ -87,12 +92,27 @@ public class TickService {
                 Duration.between(started, finished), status);
         log.info("Tick {}: {} boards ({} unchanged, {} failed), {} new postings, {} closed, {} ms",
                 tickId, summary.boardsChecked(), unchanged, failed, newPostings, closed, summary.took().toMillis());
+        alertIfUnhealthy();
         try {
             relay.run();
         } catch (RuntimeException e) {
             log.error("Outbox relay failed; it runs again next tick", e); // the tick itself succeeded
         }
         return summary;
+    }
+
+    private void alertIfUnhealthy() {
+        List<TickRepository.Status> recent = ticks.latestStatuses(FAILED_TICKS_ALERT);
+        if (recent.size() == FAILED_TICKS_ALERT && recent.stream().allMatch(s -> s == TickRepository.Status.FAILED)) {
+            admin.notifyOncePerDay("ticks-failing", "The last " + FAILED_TICKS_ALERT
+                    + " ticks all failed: no board answered. Is the network or the database down?");
+        }
+        List<Board> enabled = boards.findEnabled();
+        long failing = enabled.stream().filter(b -> b.consecutiveFailures() > 0).count();
+        if (!enabled.isEmpty() && failing > FAILING_BOARDS_ALERT * enabled.size()) {
+            admin.notifyOncePerDay("boards-failing", failing + " of " + enabled.size()
+                    + " boards are failing (over 20%). /admin has details.");
+        }
     }
 
     private List<BoardCheckResult> checkAll(List<Board> enabled) {

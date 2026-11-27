@@ -44,6 +44,40 @@ public class BoardRepository {
                 .optional();
     }
 
+    /** Boards that may fail this many checks in a row before they are switched off (spec section 8). */
+    public static final int DISABLE_AFTER_FAILURES = 20;
+    /** However often a board fails, it's retried at least hourly until it's disabled. */
+    public static final int MAX_BACKOFF_SECONDS = 3600;
+
+    /**
+     * Enabled boards whose next check is due. A board checked at 10:00:05 is due again at 10:03:05, so up to 30 s
+     * early counts as due: otherwise a tick at 10:03:00 would skip it and a 3-minute board would be checked every 6.
+     */
+    public List<Board> findDue(Instant now) {
+        return jdbc.sql("""
+                        select * from boards
+                        where enabled and (next_check_at is null or next_check_at <= :soon)
+                        order by id
+                        """)
+                .param("soon", Sql.ts(now.plusSeconds(30)))
+                .query(BoardRepository::map)
+                .list();
+    }
+
+    public List<Board> findDisabled() {
+        return jdbc.sql("select * from boards where not enabled order by id").query(BoardRepository::map).list();
+    }
+
+    /** A disabled board answered again: back to normal checks from the next tick. */
+    public void reEnable(long id, Instant now) {
+        jdbc.sql("""
+                        update boards set enabled = true, consecutive_failures = 0, consecutive_empty_checks = 0,
+                            last_error = null, next_check_at = :now
+                        where id = :id
+                        """)
+                .param("now", Sql.ts(now)).param("id", id).update();
+    }
+
     public List<Board> findEnabled() {
         return jdbc.sql("select * from boards where enabled order by id").query(BoardRepository::map).list();
     }
@@ -76,31 +110,53 @@ public class BoardRepository {
                 .update();
     }
 
-    /** The check failed (HTTP error, timeout, unreadable response). Backoff rules arrive in Block 6. */
-    public void recordFailure(long id, Instant now, String error) {
-        jdbc.sql("""
+    /**
+     * The check failed (HTTP error, timeout, unreadable response). Backoff: the n-th failure in a row waits
+     * interval × 2^(n-1), at most an hour (3, 6, 12, 24, 48, 60 min…); the 20th in a row disables the board.
+     *
+     * @return true if this failure disabled the board
+     */
+    public boolean recordFailure(long id, Instant now, String error) {
+        return jdbc.sql("""
                         update boards set last_checked_at = :now, consecutive_failures = consecutive_failures + 1,
-                            last_error = :error, next_check_at = :now + make_interval(secs => check_interval_s)
+                            last_error = :error, next_check_at = :now + make_interval(secs => least(:maxBackoff,
+                                check_interval_s * power(2, least(consecutive_failures, 10))::int)),
+                            enabled = consecutive_failures + 1 < :disableAfter
                         where id = :id
+                        returning not enabled
                         """)
                 .param("now", Sql.ts(now))
                 .param("error", truncate(error))
+                .param("maxBackoff", MAX_BACKOFF_SECONDS)
+                .param("disableAfter", DISABLE_AFTER_FAILURES)
                 .param("id", id)
-                .update();
+                .query(Boolean.class)
+                .optional().orElse(false);
     }
 
-    /** A board that had jobs answered "0 jobs": counted as a failure and ignored until it repeats 3 times. */
-    public void recordSuspiciousEmpty(long id, Instant now, String error) {
-        jdbc.sql("""
+    /**
+     * A board that had jobs answered "0 jobs": counted as a failure (same backoff) and ignored until it repeats
+     * 3 times.
+     *
+     * @return true if this disabled the board
+     */
+    public boolean recordSuspiciousEmpty(long id, Instant now, String error) {
+        return jdbc.sql("""
                         update boards set last_checked_at = :now, consecutive_failures = consecutive_failures + 1,
                             consecutive_empty_checks = consecutive_empty_checks + 1, last_error = :error,
-                            next_check_at = :now + make_interval(secs => check_interval_s)
+                            next_check_at = :now + make_interval(secs => least(:maxBackoff,
+                                check_interval_s * power(2, least(consecutive_failures, 10))::int)),
+                            enabled = consecutive_failures + 1 < :disableAfter
                         where id = :id
+                        returning not enabled
                         """)
                 .param("now", Sql.ts(now))
                 .param("error", truncate(error))
+                .param("maxBackoff", MAX_BACKOFF_SECONDS)
+                .param("disableAfter", DISABLE_AFTER_FAILURES)
                 .param("id", id)
-                .update();
+                .query(Boolean.class)
+                .optional().orElse(false);
     }
 
     private static String truncate(String error) {
