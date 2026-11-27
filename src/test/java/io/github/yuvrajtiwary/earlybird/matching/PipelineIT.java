@@ -56,7 +56,7 @@ class PipelineIT extends PipelineFixtures {
         assertThat(instant.missingSkills()).containsExactly("Kafka");
         assertThat(instant.sentAt()).isNotNull();
         assertThat(messagesTo(keen)).singleElement().satisfies(m -> assertThat(m)
-                .contains("New match · 84/100", "Backend Engineer (Java)", "fb:r:" + Base62.encode(instant.id())));
+                .contains("Strong match", "84/100", "Backend Engineer (Java)", "fb:r:" + Base62.encode(instant.id())));
 
         Alert later = awaitAlert(picky, postingId, Alert.Status.QUEUED);
         assertThat(later.mode()).isEqualTo(Alert.Mode.DIGEST);
@@ -71,7 +71,7 @@ class PipelineIT extends PipelineFixtures {
         digest.sendAll();
         assertThat(alert(picky, postingId).status()).isEqualTo(Alert.Status.SENT);
         assertThat(messagesTo(picky)).singleElement().satisfies(m -> assertThat(m)
-                .contains("Your EarlyBird digest", "Backend Engineer (Java)"));
+                .contains("Your evening digest", "Backend Engineer (Java)"));
     }
 
     @Test

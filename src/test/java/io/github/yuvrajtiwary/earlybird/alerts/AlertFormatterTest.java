@@ -139,4 +139,20 @@ class AlertFormatterTest {
                 .contains("<b>2.</b> <a href=\"https://y.com\">Data Engineer</a>\n🏢 Beta  ·  🔵 48/100")
                 .endsWith("⚙️ Change that with /prefs");
     }
+
+    /** Telegram rejects a whole message over one unbalanced tag; board text full of markup must not cause one. */
+    @Test
+    void alertsAndDigestsAreWellFormedHtml() {
+        var formatter = new AlertFormatter("");
+        List<String> skills = List.of("C++", "<b>", "R&D");
+        List<String> messages = List.of(
+                formatter.alert(delivery("</b><i>Lead", List.of("<Pune>"), "remote", 1.0, 3.0, skills, skills), false, NOW),
+                formatter.alert(delivery("T", List.of(), null, null, null, List.of(), List.of()), true, NOW),
+                formatter.digest(List.of(new DigestItem(Ids.newId(), 1, 42, "<a>", "</a>", "https://x.com/?a=<b>", 99))));
+
+        assertThat(messages).allSatisfy(m -> {
+            assertThat(io.github.yuvrajtiwary.earlybird.support.HtmlBalance.unbalanced(m)).as(m).isEmpty();
+            assertThat(m.length()).isLessThanOrEqualTo(4096);
+        });
+    }
 }

@@ -30,14 +30,14 @@ class KeyboardsTest {
     void selectedChoicesAreTicked() {
         var roles = buttons(Keyboards.roles(List.of(RoleCategory.BACKEND)));
         assertThat(roles).filteredOn(b -> b.callbackData().equals("r:backend"))
-                .singleElement().extracting(InlineKeyboardButton::text).isEqualTo("✓ Backend");
+                .singleElement().extracting(InlineKeyboardButton::text).isEqualTo("✅ Backend");
         assertThat(roles).filteredOn(b -> b.callbackData().equals("r:frontend"))
                 .singleElement().extracting(InlineKeyboardButton::text).isEqualTo("Frontend");
         assertThat(roles).extracting(InlineKeyboardButton::callbackData).contains("r:done").doesNotContain("r:other");
 
         var locations = buttons(Keyboards.locations(List.of(LocationChoice.REMOTE_INDIA)));
         assertThat(locations).filteredOn(b -> b.callbackData().equals("l:rin"))
-                .singleElement().extracting(InlineKeyboardButton::text).isEqualTo("✓ Remote (India)");
+                .singleElement().extracting(InlineKeyboardButton::text).isEqualTo("✅ Remote (India)");
     }
 
     @Test

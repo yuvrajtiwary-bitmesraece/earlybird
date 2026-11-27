@@ -225,7 +225,7 @@ class ProfileFlows {
         }
         if (session.state() == State.AWAITING_RESUME) {
             sessions.save(user.id(), Session.idle());
-            api.editMessageText(chatId, messageId, "Upload cancelled.", null);
+            api.editMessageText(chatId, messageId, Texts.uploadCancelled(), null);
             return null;
         }
         return STALE;
@@ -246,18 +246,16 @@ class ProfileFlows {
             case "roles" -> {
                 List<String> codes = p.roles().stream().map(Labels::code).toList();
                 sessions.save(user.id(), new Session(State.EDIT_ROLES, new Draft(codes, List.of(), null, null)));
-                api.editMessageText(chatId, messageId, "Pick your roles, then tap <b>Done</b>.", Keyboards.roles(p.roles()));
+                api.editMessageText(chatId, messageId, Texts.editRoles(), Keyboards.roles(p.roles()));
             }
             case "locs" -> {
                 List<LocationChoice> current = ProfileService.locations(p);
                 List<String> codes = current.stream().map(LocationChoice::code).toList();
                 sessions.save(user.id(), new Session(State.EDIT_LOCATIONS, new Draft(List.of(), codes, null, null)));
-                api.editMessageText(chatId, messageId, "Pick your locations, then tap <b>Done</b>.",
-                        Keyboards.locations(current));
+                api.editMessageText(chatId, messageId, Texts.editLocations(), Keyboards.locations(current));
             }
-            case "exp" -> api.editMessageText(chatId, messageId,
-                    "How much full-time work experience do you have?", Keyboards.experience());
-            case "intern" -> api.editMessageText(chatId, messageId, "Should I include internships?", Keyboards.internships());
+            case "exp" -> api.editMessageText(chatId, messageId, Texts.editExperience(), Keyboards.experience());
+            case "intern" -> api.editMessageText(chatId, messageId, Texts.editInternships(), Keyboards.internships());
             case "score" -> api.editMessageText(chatId, messageId, Texts.minScorePrompt(), Keyboards.minScore(p.minScore()));
             case "cap" -> api.editMessageText(chatId, messageId, Texts.dailyCapPrompt(), Keyboards.dailyCap(p.dailyCap()));
             case "back" -> api.editMessageText(chatId, messageId, Texts.prefs(p), Keyboards.prefsMenu());
@@ -292,9 +290,9 @@ class ProfileFlows {
         return profiles.find(user.id()).orElseThrow(() -> new IllegalStateException("onboarded user without profile"));
     }
 
-    /** The step's question, now answered: "<question>\n✓ <answer>", with the buttons removed. */
+    /** The step, now answered: its headline, then "✅ <answer>", with the buttons removed. */
     private static String done(String question, String answer) {
-        return question.split("\n")[0] + "\n✓ " + io.github.yuvrajtiwary.earlybird.common.Html.escape(answer);
+        return question.split("\n")[0] + "\n✅ " + io.github.yuvrajtiwary.earlybird.common.Html.escape(answer);
     }
 
     private static List<RoleCategory> roles(Draft d) {
