@@ -13,6 +13,7 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
 import static com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import io.github.yuvrajtiwary.earlybird.sources.SourceException.Kind;
@@ -130,6 +131,24 @@ class SourceHttpTest {
         assertThatThrownBy(() -> http.get(uri("/hang"), null, SourceHttpTest::asString))
                 .isInstanceOfSatisfying(SourceException.class, e -> assertThat(e.kind()).isEqualTo(Kind.NETWORK));
         wm.verify(3, getRequestedFor(urlEqualTo("/hang")));
+    }
+
+    /**
+     * Issue #5: headers arrive at once, then the body stalls. The read timeout must cover the body too, or the
+     * board's thread (and the whole tick) waits forever.
+     */
+    @Test
+    void aBodyThatStallsTimesOutLikeAnyOtherRead() {
+        String body = "{\"jobs\": [" + "{\"id\": 1},".repeat(200) + "{\"id\": 2}]}";
+        wm.stubFor(get(urlEqualTo("/trickle")).willReturn(okJson(body).withChunkedDribbleDelay(20, 30_000)));
+
+        long started = System.nanoTime();
+        assertTimeoutPreemptively(Duration.ofSeconds(15), () ->
+                assertThatThrownBy(() -> http.get(uri("/trickle"), null, SourceHttpTest::asString))
+                        .isInstanceOfSatisfying(SourceException.class, e -> assertThat(e.kind()).isEqualTo(Kind.NETWORK)));
+        // Three attempts of 0.8 s each, plus overhead, and far less than the 30 s the body would take.
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(6));
+        wm.verify(3, getRequestedFor(urlEqualTo("/trickle")));
     }
 
     @Test
