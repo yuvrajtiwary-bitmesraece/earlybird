@@ -79,7 +79,7 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 | Lever | `api.lever.co/v0/postings/{site}?mode=json` | none (`createdAt` is when the draft was created, sometimes months earlier) | Descriptions included; requirement lists are put first so they survive the 3,000-character cut |
 | Ashby | `api.ashbyhq.com/posting-api/job-board/{name}` | `publishedAt` | Descriptions included; unlisted jobs skipped |
 
-- **Seed list:** [`seed-boards.csv`](src/main/resources/boards/seed-boards.csv) has 130 companies that currently list jobs in India or remote jobs open to India. It was found by trying ~740 candidate companies on all three platforms, then checking each board's identity and job locations. It is loaded at startup (insert-if-absent).
+- **Seed list:** [`seed-boards.csv`](src/main/resources/boards/seed-boards.csv) has 130 companies that currently list jobs in India or remote jobs open to India. It was found by trying ~740 candidate companies on all three platforms, then checking each board's identity and job locations. Each row is `source,token,domain,company`; the domain is the company's website, used for its logo. It is loaded at startup (insert-if-absent; a changed domain is updated on existing boards).
 - **Check the list** (no database or web server needed):
   ```bash
   java -jar target/earlybird.jar --validate-boards     # writes reports/board-validation.csv
@@ -94,7 +94,8 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 - **Matching:** each tagged posting is compared with every active user who chose its role. A posting must pass three filters: location (a chosen city, with Delhi NCR and Mumbai treated as regions, or remote in India or worldwide), experience, and internships only if wanted.
   - Score (0–100) = 65 × share of the posting's main skills you have + 20 × experience fit + 15 × location fit.
   - Below 40: nothing. At or above your minimum (default 55): an instant alert. In between: the evening digest. Jobs found on a board's first check always go to the digest.
-- **Alerts:** title, company, location, score, the skills you have and the ones you're missing, with **Apply**, optional **Prep**, and 👍 / 👎 buttons.
+- **Alerts:** a match tier (🔥 Excellent / 🟢 Strong / 🔵 Good) and score bar, then title, company, location and experience, with the skills you have and the ones worth learning in a quote block. **Apply**, optional **Prep**, and 👍 / 👎 buttons.
+  - **Company logo:** shown as a small preview beside the alert, from Google's public favicon service for the company's domain (the `domain` column in the seed list). No key is needed. A company without a logo gets a plain alert.
   - **No duplicates:** each alert is a row with a unique (user, posting) key, and it is claimed (`queued → sending`) before it is sent. A redelivered event or a re-run tick can't alert the same user twice about the same job.
   - **Limits:** a daily cap per user (default 10; past it, matches go to the digest), one message per second per chat, and 25 per second overall (Telegram's bulk limit is about 30).
   - **Failures:** Telegram 403 (the user blocked the bot) marks the user blocked; 429 and 5xx are retried.

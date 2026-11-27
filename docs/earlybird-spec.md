@@ -205,7 +205,7 @@ One `JobSource` implementation per source.
   3. For open postings missing from `current`, increment `missing_count`, and close the posting when it reaches 2. Only do this after a successful response.
   4. Suspicious-empty guard: if a board that had 5 or more jobs suddenly returns 0, close nothing and count it as a failure, unless it happens 3 checks in a row.
 - **Reposts:** `content_hash = sha256(lower(company) | lower(title) | normalized location | first 1,000 chars of plain description)`. If the same hash was seen in the last 30 days under a different ID, set `is_repost = true` and don't alert.
-- **Seed list:** `src/main/resources/boards/seed-boards.csv` (`source,token,company`) with about 150 companies that hire in India or remote, loaded idempotently at startup. Add a `validate-boards` command (for example `java -jar app.jar --validate-boards`, which runs without starting the web server). It calls each board and writes a report; drop invalid tokens. Target at least 120 valid boards.
+- **Seed list:** `src/main/resources/boards/seed-boards.csv` (`source,token,domain,company`; the domain was added for logos in issue #10) with about 150 companies that hire in India or remote, loaded idempotently at startup. Add a `validate-boards` command (for example `java -jar app.jar --validate-boards`, which runs without starting the web server). It calls each board and writes a report; drop invalid tokens. Target at least 120 valid boards.
 - **Scheduling:** v1 checks every enabled board on every tick. Adaptive intervals (busy boards every 3 minutes, quiet ones up to every 30 minutes) exist behind `ADAPTIVE_SCHEDULING=false`, for when there are thousands of boards.
 - **Copyright:** store a description only until it's tagged, never display full descriptions, and always link to the original posting.
 
@@ -293,17 +293,28 @@ Rules:
   - 403 (the user blocked the bot): mark the user `blocked`.
   - Other 4xx: mark `failed` and send to the DLQ.
   - 5xx and timeouts: retry with backoff.
-- **Message format:** HTML parse mode, escape all text, at most 4,096 characters:
+- **Message format:** HTML parse mode, escape all text, at most 4,096 characters. A tier header (🔥 Excellent match from 85, 🟢 Strong match from 70, 🔵 Good match below), a 10-cell score bar, then the title, company, place and experience, with the skills in a `<blockquote>`:
   ```
-  🐦 New match · 78/100
-  <b>Backend Engineer I</b> — ExampleCo
-  📍 Bengaluru · Hybrid · 0–2 yrs · found 2 min ago
-  ✅ You have: Java, Spring Boot, PostgreSQL
-  ➕ Missing: Kafka, Docker
+  🟢 Strong match
+  ▰▰▰▰▰▰▰▰▱▱  78/100
+
+  <b>Backend Engineer I</b>
+  🏢 ExampleCo
+
+  📍 Bengaluru · Hybrid
+  🎓 0–2 yrs  ·  ⏱ found 2 min ago
+
+  ┃ ✅ You have
+  ┃ Java · Spring Boot · PostgreSQL
+  ┃
+  ┃ 📚 Worth learning
+  ┃ Kafka · Docker
   ```
+- **Company logo:** shown as a small link preview beside the alert (`link_preview_options` with the logo as `url`, `prefer_small_media`). The logo URL is Google's public favicon service for the board's `domain` (a column on `boards`, set from the seed file). With no domain, the alert is sent without a preview. Every other message keeps link previews off.
+- *Changed on 2026-11-27 (issue #10): the alert, the digest and all bot messages were redesigned to be easier to scan, and alerts gained the company logo. The earlier layout was five dense lines with comma lists.*
 - **Buttons:**
   - Row 1: **Apply ↗** (the posting URL) and **Prep for this job ↗** (`PREP_LINK_TEMPLATE` filled in, URL-encoded; hidden if the template is empty).
-  - Row 2: **👍 Relevant** and **👎 Not relevant**.
+  - Row 2: **👍 Relevant** and **👎 Not for me**.
   - Callback data must fit in 64 bytes, for example `fb:r:{alertId in base62}`.
 - **Feedback:** stored on the alert and shown on `/stats` as "alert relevance."
 - **Digest:** at 20:00 IST, one message per user with up to 10 digest alerts from the last 24 hours (title, company, score, link), then mark them sent.
