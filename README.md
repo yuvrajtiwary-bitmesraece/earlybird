@@ -4,7 +4,7 @@
 
 EarlyBird sends you a Telegram alert within minutes of a matching job going live on a company's careers page, with your match score and the skills you're missing.
 
-> **Status:** under construction. Blocks 1–5 of 13 are done: the project skeleton, polling 130 real job boards, the Telegram bot (onboarding, resume parsing, commands), tagging, matching and alerts, and the Kafka event bus. Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
+> **Status:** under construction. Blocks 1–6 of 13 are done: the project skeleton, polling 130 real job boards, the Telegram bot (onboarding, resume parsing, commands), tagging, matching and alerts, the Kafka event bus, and scheduling with QStash. Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
 
 ## How it works
 
@@ -130,6 +130,22 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
   4. Run `java scripts/KafkaPemsToEnv.java <folder>`. It checks the files belong together and writes them into `.env` as one-line PEM text (no keystore files), printing only OK/FAIL.
 - **Dev and prod share Aiven's single free service.** Outside production, consumer groups carry the environment's name (`dev.eb-matcher`), so a laptop can't take events away from production. Once production is live, run dev on the in-process bus anyway.
 
+## Scheduling and maintenance
+
+| Endpoint | When (QStash schedule) | Does |
+|---|---|---|
+| `POST /internal/tick` | every 3 minutes | checks boards that are due, then runs the outbox relay |
+| `POST /internal/digest` | 20:00 IST | sends the daily digests |
+| `POST /internal/maintenance` | 03:30 IST | retention cleanup, re-enables disabled boards that answer again |
+
+- **Signed calls only.** Each call must carry QStash's `Upstash-Signature`, a JWT checked against the current or the next signing key, for exactly this URL, not expired, and with a matching body hash. Anything else gets **401**.
+- **202 at once, work in the background.** A valid call takes the job's lock and answers `202` with `started`, or `skipped` if the previous run still holds the lock. Overlapping ticks can't happen.
+- **Locks:** Redis `SET NX PX`, released only by its owner. When Redis is off or down, a Postgres advisory lock takes over; Postgres frees it if the process dies.
+- **Locally** (`SCHEDULER_MODE=internal`), the same jobs run on timers inside the app, through the same locks.
+- **Failing boards back off:** the n-th failure in a row waits 3 × 2^(n−1) minutes, at most an hour. The 20th disables the board and tells the admin; maintenance re-enables it if it answers again.
+- **Admin notices** also cover 3 failed ticks in a row, and more than 20% of boards failing.
+- **Retention:** closed postings after 60 days, alerts after 180, processed events after 7, Telegram updates after 2, ticks after 30, and untagged descriptions after 7.
+
 ## Tests
 
 ```bash
@@ -159,6 +175,8 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 | 2026-11-27 | First tick after a two-day gap | 579 new postings in 53 s; 554 published to Kafka (the rest were reposts) | Same |
 | 2026-11-27 | Job first seen → instant alert sent, through Kafka | 18 s, 18 s and 27 s for the first three real alerts | Same; Gemini tagging 15 per call |
 | 2026-11-27 | Memory with every module and Kafka | 248 MB working set, 373 MB peak during the 579-posting catch-up, 74 threads | Same, `-Xmx300m -XX:+UseSerialGC` |
+| 2026-11-27 | `/internal/*` with tokens signed by the real QStash keys | unsigned / wrong key / token for another URL: 401; signed tick: 202 started; a second tick while it ran: 202 skipped; maintenance: 202, deleted 13 old Telegram updates | Laptop, `SCHEDULER_MODE=external`, Postgres advisory lock through the Supabase session pooler |
+| 2026-11-27 | Tick with 124 of 130 boards unchanged | 25.6 s; 3 new postings, 62 closed | Same |
 | 2026-11-27 | Kafka unreachable at startup | App started (14.6 s), health `DEGRADED`, readiness `UP`, one log line per outage | Laptop, Kafka pointed at a closed port |
 
 Production figures (Render, 0.1 CPU / 512 MB) will be added in Block 8.

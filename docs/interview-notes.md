@@ -380,3 +380,56 @@ One section per build block: what was built, why, the alternatives, what breaks 
    - If I commit first and crash before the transaction, the event is lost.
    - If I commit after and crash in between, the event is redelivered, and the idempotent consumer makes that harmless.
    - So the order turns a possible loss into a possible duplicate, and duplicates are already handled.
+
+## Block 6 — Scheduling with QStash, locks, backoff and maintenance (2026-11-27)
+
+### What was built
+- **`POST /internal/tick`, `/internal/digest`, `/internal/maintenance`.** They check QStash's signature, take the job's lock, answer `202` at once and run the job on a virtual thread. A run that's still going makes the next call answer `skipped`.
+- **`QStashVerifier`:** a hand-written HS256 JWT check of the claims QStash documents. It accepts the current or the next key, and checks the issuer, the subject (the exact URL), `exp`/`nbf` with 10 s of skew, and the body hash (base64url SHA-256, padding ignored as in QStash's SDK).
+- **Locks:** `RedisLock` (`SET NX PX`, plus a Lua compare-and-delete release), falling back to `PostgresAdvisoryLock` (a session lock on its own pooled connection). The in-memory lock is gone.
+- **One job runner, `InternalJobs`,** shared by QStash's endpoints and the local timers. The nightly maintenance job is new.
+- **Board backoff:** the n-th failure in a row waits 3 × 2^(n−1) minutes (capped at an hour), and the 20th disables the board. Ticks check only due boards.
+- **Admin notices:** a disabled board, 3 failed ticks in a row, more than 20% of boards failing.
+- **Verified:**
+  - CI: unit tests include QStash test vectors (both keys, wrong key, another URL, changed body, expired, not yet valid, wrong issuer, `alg: none`). Integration tests cover 401s, 202 "skipped" while the tick lock is held, a signed maintenance call that deletes old rows, the Postgres lock, the Redis lock (only the owner releases), and the backoff schedule.
+  - Locally, with tokens signed by the real QStash keys against the dev database: 401 for unsigned, wrong key and another URL; 202 started, then 202 skipped for an overlapping tick; maintenance deleted 13 old Telegram updates.
+  - Not verified yet: a call actually sent by QStash. That needs a public URL, so it comes with Render in Block 8.
+
+### Why this design
+- **QStash instead of the app's own timers in production.** A free Render instance sleeps after 15 idle minutes, and a sleeping app runs no timers. An outside call every 3 minutes both wakes it and keeps it awake. QStash's free 1,000 messages a day cover 480 ticks + 2 more jobs + retries.
+- **202 and background work.** The tick takes 15–50 s on a laptop, and longer on 0.1 CPU. Answering at once keeps QStash from timing out and retrying a tick that is actually running. The lock turns any retry into a cheap "skipped".
+- **Verifying the subject matters.** Without it, any valid token (say, for `/internal/digest`) could be replayed against `/internal/tick` within its 5 minutes. A test proves a token for one URL fails on another.
+- **Hand-written JWT check, not a library.** The format is fixed (HS256 only), and a general library brings options like other algorithms or `alg: none` that only widen what's accepted. ~100 lines and a test per rule.
+- **Redis lock with a Postgres fallback.** The spec wants Redis, but Redis is optional everywhere in this app. Postgres advisory locks need no lease: the lock dies with the session. That's also why Block 0 chose Supabase's session pooler; the transaction pooler can't hold session locks. Lock names include the schema, because dev and prod share one database.
+- **Backoff in SQL.** One `update … returning not enabled` computes the next check time and the disable flag in the same statement, so there is no read-then-write race between two checks.
+- **"Due" includes 30 s early.** A board checked at :05 is due at the next :00 tick. Without the slack, a 3-minute board would really be checked every 6 minutes. A test pins this.
+
+### Alternatives considered
+| Option | Why not |
+|---|---|
+| `@Scheduled` timers in production | Render's free instance sleeps when idle, and sleeping apps don't run timers |
+| GitHub Actions cron | Delayed by minutes under load, and no signed delivery |
+| A JWT library (jjwt, nimbus) | More surface (algorithms, key types) for a fixed HS256 check |
+| ShedLock | Another dependency and table for three locks; Redis or an advisory lock is a few lines |
+| Doing the tick inside the HTTP request | QStash would time out and retry a tick that is still running |
+| Linear or no backoff | A dead board would cost a request every 3 minutes forever; disabling with a nightly re-check costs one a day |
+
+### What breaks first
+- **At 10× (~1,300 boards):** one tick takes longer than 3 minutes on 0.1 CPU. The lock keeps ticks from overlapping, but boards would be checked less often than promised. Fixes: raise concurrency, split boards across instances, or give boards their own intervals (the `next_check_at` column is ready).
+- **At 100×:**
+  - QStash's free 1,000 messages a day is enough for the schedules, but not for one message per board.
+  - The Postgres lock holds 1 of the 5 pool connections for the whole tick, while the tick itself uses up to 8 boards' worth of queries.
+
+### Likely interview questions
+1. **"How do you know a call to `/internal/tick` really came from QStash?"**
+   - It carries a JWT signed with HS256 using our QStash signing key. I check the signature against the current and the next key, so key rotation needs no downtime.
+   - Then the claims: issuer is Upstash; subject is exactly this endpoint's URL, so a token for another endpoint can't be replayed here; not expired and already valid; and the body's SHA-256 matches the token.
+   - Unsigned or wrong gets 401. The comparison is constant-time.
+2. **"What if two ticks overlap, for example QStash retries while one is still running?"**
+   - Every job takes a named lock before it starts; the second call can't get it and answers 202 "skipped".
+   - The lock is Redis `SET NX PX` with a lease and an owner token, so a crashed holder can't block forever and a late holder can't free someone else's lock.
+   - If Redis is down, a Postgres advisory lock decides instead, and Postgres releases it automatically if the process dies.
+3. **"A job board starts failing. What does your system do?"**
+   - Each failure in a row doubles the wait before the next check, from 3 minutes up to an hour, so a broken board stops costing a request every tick.
+   - After 20 failures in a row it's disabled and the admin is told on Telegram. Every night, maintenance re-checks disabled boards and re-enables any that answer with jobs again.
+   - If more than 20% of boards fail, or 3 ticks in a row fail, that's probably our network or a platform outage rather than the boards, and the admin is told about that too.
