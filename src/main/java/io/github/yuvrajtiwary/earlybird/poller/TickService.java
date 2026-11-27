@@ -25,9 +25,11 @@ import org.springframework.stereotype.Service;
  * One poller tick: check every board that is due (failing boards back off), record the outcome, tell the admin
  * if ticks keep failing or many boards do, then run the outbox relay, which publishes events that didn't reach
  * the bus earlier.
- * Boards are checked in parallel on virtual threads, at most {@value #MAX_CONCURRENT_BOARDS} at a time so
- * the 5-connection database pool and 512 MB of memory aren't overwhelmed. One board failing, even with an
- * unexpected exception, never stops the others.
+ * Boards are checked in parallel on virtual threads, at most {@value #MAX_CONCURRENT_BOARDS} at a time. Each check
+ * needs a database connection, and the pool has 5 (spec section 10) shared with tagging, matching, delivery and
+ * the website, so the tick leaves 2 for them. With 8 at a time, the first production ticks on 0.1 CPU ran the pool
+ * dry and board checks crashed waiting for a connection (issue #5). One board failing, even with an unexpected
+ * exception, never stops the others.
  */
 @Service
 @ConditionalOnRole(Role.POLLER)
@@ -35,7 +37,7 @@ public class TickService {
 
     private static final Logger log = LoggerFactory.getLogger(TickService.class);
 
-    static final int MAX_CONCURRENT_BOARDS = 8;
+    static final int MAX_CONCURRENT_BOARDS = 3;
     /** Spec 3.11: the admin hears about 3 failed ticks in a row, or more than 20% of boards failing. */
     static final int FAILED_TICKS_ALERT = 3;
     static final double FAILING_BOARDS_ALERT = 0.20;
