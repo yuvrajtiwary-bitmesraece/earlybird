@@ -33,4 +33,5 @@ ENV SPRING_PROFILES_ACTIVE=prod \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=60 -XX:+UseSerialGC -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=48m -Xss512k -XX:+ExitOnOutOfMemoryError -XX:TieredStopAtLevel=1"
 EXPOSE 8080
 # Render sets PORT; application.yml binds server.port to it. Native access is for Kafka's zstd library.
-ENTRYPOINT ["java", "--enable-native-access=ALL-UNNAMED", "-jar", "application.jar"]
+# Boot's extract keeps the uber jar's name, so the application layer holds earlybird.jar (pom.xml's finalName).
+ENTRYPOINT ["java", "--enable-native-access=ALL-UNNAMED", "-jar", "earlybird.jar"]
