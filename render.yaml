@@ -9,7 +9,10 @@ services:
       url: ghcr.io/yuvrajtiwary-bitmesraece/earlybird:latest
     plan: free
     region: singapore
-    healthCheckPath: /actuator/health/readiness
+    # Liveness, not readiness: Render restarts instances that fail this check, and readiness waits on the
+    # database pool. A busy pool must not get a healthy app restarted (issue #8). Deploys stay safe because the
+    # app won't start without its database (Flyway migrates at startup).
+    healthCheckPath: /actuator/health/liveness
     envVars:
       # Not secret
       - key: SPRING_PROFILES_ACTIVE
