@@ -433,3 +433,53 @@ One section per build block: what was built, why, the alternatives, what breaks 
    - Each failure in a row doubles the wait before the next check, from 3 minutes up to an hour, so a broken board stops costing a request every tick.
    - After 20 failures in a row it's disabled and the admin is told on Telegram. Every night, maintenance re-checks disabled boards and re-enables any that answer with jobs again.
    - If more than 20% of boards fail, or 3 ticks in a row fail, that's probably our network or a platform outage rather than the boards, and the admin is told about that too.
+
+## Block 7 — The public website and stats (2026-11-27)
+
+### What was built
+- **Pages** (Thymeleaf, no login, no JavaScript):
+  - `/`: the pitch, 3 steps, Telegram and GitHub buttons, and live numbers;
+  - `/live`: the newest 50 open postings, with a role filter and a 60 s refresh via a meta tag;
+  - `/stats`: 14-day bars drawn as SVG on the server, p50/p95 latencies, 👍/👎 relevance, top companies and top fresher skills;
+  - `/privacy` and `/status`.
+- **JSON API:** `/api/public/stats` and `/api/public/postings`, GET only, CORS open.
+- **`PublicStatsRepository`:** every number as plain SQL, with `percentile_cont` for the percentiles. **`PublicData`** caches it for 60 s with Caffeine.
+- **Headers and size:** CSP `default-src 'self'`, `frame-ancestors 'none'`, `nosniff`, a strict referrer policy, and gzip.
+- **Verified:**
+  - CI: an integration test checks every statistic against numbers worked out by hand. Lags of 10/20/30/40 s must give p50 25 s and p95 38.5 s; publish → alert gives 115/119.5 s; plus relevance, top companies and per-day counts. A "recent match" and a digest alert must be excluded from latency. The same test checks HTML escaping of a `<script>` title, the role filter, the headers, page sizes, and CORS on the API.
+  - Locally against the dev database, the API's numbers matched independent SQL: 130 boards, 582 postings in 24 h, the per-day counts, and the top companies. The largest page is 22 KB, every response is gzipped, and no page has a `<script>`.
+
+### Why this design
+- **Server-rendered HTML, not a SPA.** There's no build step, and pages are tiny under Render's bandwidth cap. It works without JavaScript, and Thymeleaf escapes everything by default, so job titles from the internet can't inject markup. A test puts `<script>` in a title.
+- **SVG bars drawn on the server.** A chart library would mean JavaScript and a looser CSP. Fourteen rectangles are a few lines of arithmetic, and that arithmetic is unit-tested.
+- **A strict CSP.** No inline scripts or styles at all, so even an escaping bug couldn't run script. That's why styles live in one CSS file and `/live` refreshes with a meta tag.
+- **Cache for 60 s.** At most one round of stats queries per minute, however many visitors, which matters on a 5-connection pool and 0.1 CPU. Stats a minute old are fine.
+- **What latency counts.** Delivery lag is defined as sent − first seen, but "recent matches" sent after onboarding are for jobs up to two days old and would make p95 look like hours. So only instant alerts created within an hour of the job being found count. Published → alert uses only Greenhouse and Ashby, whose publish time is trustworthy; Lever's isn't stored.
+- **Bounded time windows in the queries** (`since` and `until`). Production passes `now`, and tests use a window no other test writes to, so hand-worked numbers can be asserted exactly in a shared database.
+
+### Alternatives considered
+| Option | Why not |
+|---|---|
+| React/Vue front end | A build step, larger pages, JavaScript needed, a looser CSP |
+| Chart.js | External script, CSP exceptions, and more bytes than the data |
+| Computing percentiles in Java | `percentile_cont` does it in one query, close to the data |
+| Spring's `@Cacheable` | Proxies and config for what is a single Caffeine cache with one lifetime |
+| Materialized views | Need refresh scheduling; a 60 s cache is simpler at this traffic |
+
+### What breaks first
+- **At 10×:** nothing much. Each cache miss queries postings by `first_seen_at`, which is indexed. `/live` is limited to 50 rows.
+- **At 100×:** the per-day and top-skills queries scan a week of postings, with `unnest` over skills. Precomputing daily rollups during the nightly maintenance would make them constant-time. The 60 s cache protects the database from traffic either way.
+
+### Likely interview questions
+1. **"How do you compute p95 delivery time, and what exactly does it measure?"**
+   - `percentile_cont(0.95)` over sent − first-seen, in seconds, for instant alerts sent in the last 7 days.
+   - Only alerts created within an hour of the job being found count, so "recent matches" sent to new users for older jobs don't look like slow delivery. Digest alerts are excluded too.
+   - A second figure, publish → alert, uses the platform's publish time where it's trustworthy.
+   - The integration test checks the arithmetic: lags of 10/20/30/40 s must give 25 s and 38.5 s.
+2. **"A job title contains `<script>`. What happens?"**
+   - Thymeleaf's `th:text` escapes it, so it shows as text.
+   - The CSP `default-src 'self'` blocks inline scripts even if escaping were ever missed.
+   - A test renders a posting titled `<script>alert(1)</script>…` and asserts the page contains the escaped form and no `<script>`.
+3. **"How does the site cope with traffic on a free instance?"**
+   - The data behind every page is cached for 60 s, so the database sees at most a few queries a minute regardless of visitors.
+   - Pages are small and gzipped (the biggest is ~22 KB raw), with no fonts, images or scripts to load.

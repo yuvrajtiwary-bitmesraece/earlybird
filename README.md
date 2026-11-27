@@ -4,7 +4,7 @@
 
 EarlyBird sends you a Telegram alert within minutes of a matching job going live on a company's careers page, with your match score and the skills you're missing.
 
-> **Status:** under construction. Blocks 1–6 of 13 are done: the project skeleton, polling 130 real job boards, the Telegram bot (onboarding, resume parsing, commands), tagging, matching and alerts, the Kafka event bus, and scheduling with QStash. Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
+> **Status:** under construction. Blocks 1–7 of 13 are done: the project skeleton, polling 130 real job boards, the Telegram bot (onboarding, resume parsing, commands), tagging, matching and alerts, the Kafka event bus, scheduling with QStash, and the public website. Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
 
 ## How it works
 
@@ -130,6 +130,23 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
   4. Run `java scripts/KafkaPemsToEnv.java <folder>`. It checks the files belong together and writes them into `.env` as one-line PEM text (no keystore files), printing only OK/FAIL.
 - **Dev and prod share Aiven's single free service.** Outside production, consumer groups carry the environment's name (`dev.eb-matcher`), so a laptop can't take events away from production. Once production is live, run dev on the in-process bus anyway.
 
+## Website and public API
+
+Read-only, no login, no JavaScript. Times are shown in IST.
+
+| Page | Shows |
+|---|---|
+| `/` | the pitch, 3 steps, Open in Telegram, and live numbers: boards checked, new postings in 24 h, alerts in 7 days, p95 delivery time |
+| `/live` | the newest 50 open postings (`?role=backend` etc.), refreshing every minute |
+| `/stats` | 14 days of postings and alerts (SVG bars), p50/p95 latency, alert relevance, top hiring companies, top skills in fresher-friendly jobs |
+| `/status` | database, Redis and Kafka status, the last successful check, Gemini budget left |
+| `/privacy` | what's stored, Gemini processing, retention, `/delete` |
+| `/api/public/stats`, `/api/public/postings` | the same data as JSON, GET only, CORS open |
+
+- **Latency** (spec 3.13): *delivery* is alert sent − job first seen. *Published → alert* uses Greenhouse's and Ashby's publish times; Lever doesn't give a trustworthy one. Both count only instant alerts sent within an hour of the job being found, so "recent matches" for older jobs don't look like slow delivery.
+- **Light by design:** data is cached for 60 s, responses are gzipped, there are no fonts or trackers, and pages are 1–22 KB.
+- **Security headers:** CSP `default-src 'self'` (no inline script or style) with `frame-ancestors 'none'`, plus `nosniff` and a strict referrer policy.
+
 ## Scheduling and maintenance
 
 | Endpoint | When (QStash schedule) | Does |
@@ -177,6 +194,7 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 | 2026-11-27 | Memory with every module and Kafka | 248 MB working set, 373 MB peak during the 579-posting catch-up, 74 threads | Same, `-Xmx300m -XX:+UseSerialGC` |
 | 2026-11-27 | `/internal/*` with tokens signed by the real QStash keys | unsigned / wrong key / token for another URL: 401; signed tick: 202 started; a second tick while it ran: 202 skipped; maintenance: 202, deleted 13 old Telegram updates | Laptop, `SCHEDULER_MODE=external`, Postgres advisory lock through the Supabase session pooler |
 | 2026-11-27 | Tick with 124 of 130 boards unchanged | 25.6 s; 3 new postings, 62 closed | Same |
+| 2026-11-27 | Website against the dev database | All pages 200; largest 22 KB before gzip; API numbers matched independent SQL (130 boards, 582 postings in 24 h, per-day counts, top companies) | Laptop, web role only |
 | 2026-11-27 | Kafka unreachable at startup | App started (14.6 s), health `DEGRADED`, readiness `UP`, one log line per outage | Laptop, Kafka pointed at a closed port |
 
 Production figures (Render, 0.1 CPU / 512 MB) will be added in Block 8.
@@ -195,17 +213,18 @@ src/main/java/io/github/yuvrajtiwary/earlybird/
   alerts/       notifier, message format, daily caps, digest
   profiles/     resume pipeline (PDF text, contact stripping, Gemini), profile service
   telegram/     Bot API client, webhook + polling, onboarding, commands, feedback buttons, admin
-  ops/          distributed lock, internal scheduler, admin notices
+  ops/          QStash verifier, /internal/* endpoints, locks, jobs, maintenance, admin notices
+  web/          public pages, JSON API, cached stats, security headers
   persistence/  JdbcClient repositories and table records
 src/main/resources/db/migration/   Flyway migrations
 src/main/resources/boards/         seed-boards.csv
 src/main/resources/skills.yaml     canonical skill names and aliases
 src/main/resources/prompts/        Gemini system instructions
+src/main/resources/templates/      Thymeleaf pages; static/style.css
 src/test/resources/fixtures/       real API responses used by the parser tests
 scripts/KafkaPemsToEnv.java        Aiven's certificate files → .env
 ```
 
-Later blocks add `web/`.
 
 ## License
 
