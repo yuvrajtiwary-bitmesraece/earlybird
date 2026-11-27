@@ -546,7 +546,8 @@ earlybird/
 - CI runs `terraform fmt -check`, `terraform init -backend=false`, `terraform validate` and `tflint`.
 
 **render.yaml blueprint**
-- Web service, plan `free`, region `singapore`, health check path `/actuator/health/readiness`.
+- Web service, plan `free`, region `singapore`, health check path `/actuator/health/liveness`.
+  - *Changed from `/actuator/health/readiness` on 2026-11-27 (issue #8).* Render restarts an instance whose health check fails, so its one check acts as liveness. Readiness includes the database, and during the first production ticks a busy connection pool made it miss Render's 5-second limit, so Render restarted a healthy app twice. A broken database still fails a deploy, because Flyway runs at startup.
 - Environment variables declared with `sync: false` for secrets.
 
 **GitHub Actions workflows**
@@ -563,7 +564,7 @@ earlybird/
 3. **Supabase:** create a project in Singapore. If the 2-project limit is reached, use one project with schemas `earlybird` and `earlybird_dev`. Copy the pooler connection string (session mode).
 4. **Upstash:** create a Redis database in Singapore with TLS and copy `REDIS_URL`. In QStash, copy the token and both signing keys.
 5. **Aiven (only at Block 5):** create the free Kafka service and the 5 topics (2 partitions each). Download the CA certificate plus the access certificate and key (or enable SASL). Copy the bootstrap URI.
-6. **Render:** new Web Service → region Singapore → Docker (image from GHCR or repo Dockerfile) → Free plan → environment variables → health check path. Copy the `onrender.com` URL into `PUBLIC_BASE_URL`.
+6. **Render:** new Web Service → region Singapore → Docker (image from GHCR or repo Dockerfile) → Free plan → environment variables → health check path `/actuator/health/liveness`. Copy the `onrender.com` URL into `PUBLIC_BASE_URL`.
 7. **Webhook:** the app sets it on startup. Check it with `getWebhookInfo`.
 8. **QStash schedules:** the three from section 3.3, with retries set to 3.
 9. **Smoke test:** `/actuator/health`, `/status`, `/start` in the bot, upload a resume, run `/admin_tick`, watch `/live`, receive a match.
