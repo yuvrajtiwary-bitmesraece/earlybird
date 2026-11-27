@@ -1,5 +1,6 @@
 package io.github.yuvrajtiwary.earlybird.matching;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
@@ -114,13 +115,19 @@ class PipelineIT extends PipelineFixtures {
             String id = String.valueOf(5000 + i);
             leftover.add("{\"id\": " + id + ", \"title\": \"Java Developer " + i + "\", \"absolute_url\": "
                     + "\"https://jobs.example.com/" + id + "\", \"location\": {\"name\": \"Bengaluru, India\"}, "
-                    + "\"first_published\": \"" + Instant.now() + "\"}");
-            fake.stubFor(get(urlPathEqualTo(path(other) + "/" + id)).willReturn(okJson("{\"id\": " + id
-                    + ", \"content\": \"Java and Spring Boot on PostgreSQL. Freshers welcome.\", \"departments\": []}")));
+                    + "\"first_published\": \"" + Instant.now() + "\", "
+                    + "\"content\": \"Java and Spring Boot on PostgreSQL. Freshers welcome.\", \"departments\": []}");
         }
+        String jobs = "{\"jobs\": [" + String.join(",", leftover) + "], \"meta\": {\"total\": 11}}";
         stubList(other, "W/\"leftover\"", leftover.toArray(String[]::new));
+        // More new jobs than GreenhouseSource.DETAIL_CALLS_LIMIT: descriptions come from one ?content=true list call.
+        fake.stubFor(get(urlPathEqualTo(path(other))).withQueryParam("content", equalTo("true")).willReturn(okJson(jobs)));
         checker.check(reload(other));
+        assertThat(postings.findByBoard(other.id()))
+                .as("leftovers that tagging would pick up: described and open")
+                .hasSize(11).allSatisfy(p -> assertThat(p.descriptionText()).isNotBlank());
         closeOtherTestsUntaggedPostings(); // what the fixture does before each test
+        assertThat(postings.findByBoard(other.id())).allSatisfy(p -> assertThat(p.closedAt()).isNotNull());
 
         User keen = activeUser(55);
         Board board = boardWithBaseline();
