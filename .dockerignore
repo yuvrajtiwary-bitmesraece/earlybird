@@ -1,0 +1,18 @@
+# Only what the build needs: never secrets, build output or Git history.
+.env
+.env.*
+*.pem
+*.key
+*.cert
+*.p12
+*.jks
+secrets/
+target/
+.git/
+.github/
+.idea/
+.vscode/
+reports/
+docs/
+scripts/
+*.log

@@ -1,0 +1,69 @@
+# Deploy to Render after CI passes on main (spec section 10): build the image for amd64 (Render) and arm64
+# (Oracle, later), push it to GitHub's container registry as :<commit> and :latest, then call Render's deploy
+# hook with the exact tag, so Render runs the image this commit produced.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Push image and deploy to Render
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/earlybird
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.SHA }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.SHA }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy this exact image on Render
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::warning::RENDER_DEPLOY_HOOK_URL isn't set; the image was pushed but not deployed."
+            exit 0
+          fi
+          image=$(python3 -c "import urllib.parse,os; print(urllib.parse.quote(os.environ['IMAGE'] + ':' + os.environ['SHA'], safe=''))")
+          status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${HOOK}&imgURL=${image}")
+          echo "Render answered HTTP $status"
+          test "$status" = 200 -o "$status" = 202

@@ -1,6 +1,7 @@
 # Build and test on every push to main and every pull request.
 # GitHub's Ubuntu runners have Docker, so the Testcontainers integration tests (*IT), which are skipped on
-# a laptop without Docker, always run here. Block 8 adds the Docker image build to this workflow.
+# a laptop without Docker, always run here. The Docker image is built here too (the laptop has no Docker);
+# deploy.yml pushes and deploys it after this workflow passes on main.
 name: CI
 
 on:
@@ -39,6 +40,9 @@ jobs:
           total=$(grep -ho 'tests="[0-9]*"' target/failsafe-reports/TEST-*.xml | awk -F'"' '{s+=$2} END {print s+0}')
           echo "Integration tests: $total run, $skipped skipped"
           test "$total" -gt 0 && test "$skipped" -eq 0
+
+      - name: Docker image builds
+        run: docker build --tag earlybird:ci .
 
       - name: Upload coverage report
         if: always()
