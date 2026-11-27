@@ -52,12 +52,16 @@ class SourcesConfig {
                 seeds = SeedBoards.parse(reader);
             }
             int added = 0;
+            int domains = 0;
             for (SeedBoard seed : seeds) {
                 if (boards.insertIfAbsent(seed.source(), seed.token(), seed.company())) {
                     added++;
                 }
+                if (seed.domain() != null && boards.updateDomain(seed.source(), seed.token(), seed.domain())) {
+                    domains++;
+                }
             }
-            log.info("Seed boards: {} in {}, {} newly added", seeds.size(), location, added);
+            log.info("Seed boards: {} in {}, {} newly added, {} domains set", seeds.size(), location, added, domains);
         };
     }
 }

@@ -88,12 +88,13 @@ public final class ValidateBoardsCommand {
         Files.write(outDir.resolve("board-validation.csv"), lines, StandardCharsets.UTF_8);
 
         List<String> valid = new ArrayList<>();
-        valid.add("source,token,company");
+        valid.add("source,token,domain,company");
         reports.stream()
                 .filter(r -> r.status() != Status.NOT_FOUND)
                 .map(Report::board)
                 .sorted(Comparator.comparing((SeedBoard b) -> b.source()).thenComparing(b -> b.company().toLowerCase()))
-                .forEach(b -> valid.add(lower(b.source()) + "," + b.token() + "," + b.company()));
+                .forEach(b -> valid.add(lower(b.source()) + "," + b.token() + "," + (b.domain() == null ? "" : b.domain())
+                        + "," + b.company()));
         Files.write(outDir.resolve("seed-boards.valid.csv"), valid, StandardCharsets.UTF_8);
     }
 

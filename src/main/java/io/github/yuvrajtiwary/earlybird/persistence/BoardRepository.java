@@ -32,6 +32,21 @@ public class BoardRepository {
                 .update() == 1;
     }
 
+    /**
+     * Sets the company's website domain (for its logo) when it differs from what's stored. Run with seed loading,
+     * so a domain added or fixed in the seed file reaches boards that already exist.
+     */
+    public boolean updateDomain(Source source, String token, String domain) {
+        return jdbc.sql("""
+                        update boards set domain = cast(:domain as text)
+                        where source = :source and token = :token and domain is distinct from cast(:domain as text)
+                        """)
+                .param("source", Sql.db(source))
+                .param("token", token)
+                .param("domain", domain)
+                .update() == 1;
+    }
+
     public Optional<Board> findById(long id) {
         return jdbc.sql("select * from boards where id = :id").param("id", id).query(BoardRepository::map).optional();
     }

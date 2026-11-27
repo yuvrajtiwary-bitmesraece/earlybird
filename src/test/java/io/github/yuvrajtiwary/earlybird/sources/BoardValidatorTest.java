@@ -35,10 +35,10 @@ class BoardValidatorTest {
         var validator = new BoardValidator(JobSources.create(TestHttp.fast(), TestHttp.MAPPER, base, base, base));
 
         List<Report> reports = validator.validate(List.of(
-                new SeedBoard(Source.GREENHOUSE, "groww", "Groww"),
-                new SeedBoard(Source.ASHBY, "quiet", "Quiet"),
-                new SeedBoard(Source.LEVER, "gone", "Gone"),
-                new SeedBoard(Source.GREENHOUSE, "broken", "Broken")));
+                new SeedBoard(Source.GREENHOUSE, "groww", null, "Groww"),
+                new SeedBoard(Source.ASHBY, "quiet", null, "Quiet"),
+                new SeedBoard(Source.LEVER, "gone", null, "Gone"),
+                new SeedBoard(Source.GREENHOUSE, "broken", null, "Broken")));
 
         assertThat(reports).extracting(Report::status)
                 .containsExactly(Status.OK, Status.EMPTY, Status.NOT_FOUND, Status.ERROR);

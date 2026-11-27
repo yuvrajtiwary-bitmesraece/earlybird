@@ -12,15 +12,20 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Reads {@code boards/seed-boards.csv}: a header {@code source,token,company}, then one board per line.
- * Lines starting with {@code #} are comments. A bad line stops loading with its line number, so a typo
- * can't silently drop a board.
+ * Reads {@code boards/seed-boards.csv}: a header {@code source,token,domain,company}, then one board per line.
+ * The domain (e.g. {@code stripe.com}) is the company's website, used for its logo; it may be left empty.
+ * The company comes last so it may contain commas. Lines starting with {@code #} are comments. A bad line stops
+ * loading with its line number, so a typo can't silently drop a board.
  */
 public final class SeedBoards {
 
-    public record SeedBoard(Source source, String token, String company) {}
+    /** @param domain the company's website, lower case, or null if unknown */
+    public record SeedBoard(Source source, String token, String domain, String company) {}
 
+    private static final String HEADER = "source,token,domain,company";
     private static final Pattern TOKEN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
+    /** Same rule as the check constraint on boards.domain (V6). */
+    static final Pattern DOMAIN = Pattern.compile("[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+");
 
     private SeedBoards() {}
 
@@ -38,15 +43,15 @@ public final class SeedBoards {
                     continue;
                 }
                 if (!headerSeen) {
-                    if (!line.equalsIgnoreCase("source,token,company")) {
-                        throw new IllegalArgumentException("line " + lineNumber + ": expected header source,token,company");
+                    if (!line.equalsIgnoreCase(HEADER)) {
+                        throw new IllegalArgumentException("line " + lineNumber + ": expected header " + HEADER);
                     }
                     headerSeen = true;
                     continue;
                 }
-                String[] parts = line.split(",", 3);
-                if (parts.length != 3) {
-                    throw new IllegalArgumentException("line " + lineNumber + ": expected source,token,company");
+                String[] parts = line.split(",", 4);
+                if (parts.length != 4) {
+                    throw new IllegalArgumentException("line " + lineNumber + ": expected " + HEADER);
                 }
                 Source source;
                 try {
@@ -55,9 +60,13 @@ public final class SeedBoards {
                     throw new IllegalArgumentException("line " + lineNumber + ": unknown source '" + parts[0] + "'");
                 }
                 String token = parts[1].strip();
-                String company = parts[2].strip();
+                String domain = parts[2].strip().isEmpty() ? null : parts[2].strip();
+                String company = parts[3].strip();
                 if (!TOKEN.matcher(token).matches()) {
                     throw new IllegalArgumentException("line " + lineNumber + ": invalid token '" + token + "'");
+                }
+                if (domain != null && !DOMAIN.matcher(domain).matches()) {
+                    throw new IllegalArgumentException("line " + lineNumber + ": invalid domain '" + domain + "'");
                 }
                 if (company.isEmpty()) {
                     throw new IllegalArgumentException("line " + lineNumber + ": company is empty");
@@ -65,7 +74,7 @@ public final class SeedBoards {
                 if (!seen.add(source + "/" + token.toLowerCase(Locale.ROOT))) {
                     throw new IllegalArgumentException("line " + lineNumber + ": duplicate board " + source + "/" + token);
                 }
-                boards.add(new SeedBoard(source, token, company));
+                boards.add(new SeedBoard(source, token, domain, company));
             }
         }
         return boards;
