@@ -124,7 +124,8 @@ public class Notifier implements InitializingBean {
             try {
                 perChat.acquire("chat:" + d.chatId(), PER_CHAT);
                 Instant now = clock.instant();
-                Message sent = telegram.sendMessage(d.chatId(), formatter.alert(d, recent, now), formatter.keyboard(d));
+                Message sent = telegram.sendMessage(d.chatId(), formatter.alert(d, recent, now), formatter.keyboard(d),
+                        formatter.logoUrl(d));
                 alerts.markSent(id, now, sent == null ? null : sent.messageId());
                 deliveryLag.record(Duration.between(d.firstSeenAt(), now));
                 count("sent");

@@ -24,20 +24,29 @@ class AlertFormatterTest {
                 Alert.Status.QUEUED, NOW, null, null, null, null);
         return new Delivery(alert, 42, User.Status.ACTIVE, 10, title, "ExampleCo", "https://jobs.example.com/1",
                 "Bengaluru, India", NOW.minus(Duration.ofMinutes(2)), null, cities, mode, min, max,
-                List.of("Java", "Spring Boot", "PostgreSQL", "Kafka", "Docker"));
+                List.of("Java", "Spring Boot", "PostgreSQL", "Kafka", "Docker"), "example.com");
     }
 
     @Test
-    void matchesTheSpecsLayout() {
+    void matchesTheIssue10Layout() {
         Delivery d = delivery("Backend Engineer I", List.of("Bengaluru"), "hybrid", 0.0, 2.0,
                 List.of("Java", "Spring Boot", "PostgreSQL"), List.of("Kafka", "Docker"));
 
         assertThat(new AlertFormatter("").alert(d, false, NOW)).isEqualTo("""
-                🐦 New match · 78/100
-                <b>Backend Engineer I</b> — ExampleCo
-                📍 Bengaluru · Hybrid · 0–2 yrs · found 2 min ago
-                ✅ You have: Java, Spring Boot, PostgreSQL
-                ➕ Missing: Kafka, Docker""");
+                🟢 <b>Strong match</b>
+                ▰▰▰▰▰▰▰▰▱▱  78/100
+
+                <b>Backend Engineer I</b>
+                🏢 ExampleCo
+
+                📍 Bengaluru · Hybrid
+                🎓 0–2 yrs  ·  ⏱ found 2 min ago
+
+                <blockquote>✅ <b>You have</b>
+                Java · Spring Boot · PostgreSQL
+
+                📚 <b>Worth learning</b>
+                Kafka · Docker</blockquote>""");
     }
 
     @Test
@@ -46,9 +55,46 @@ class AlertFormatterTest {
 
         String text = new AlertFormatter("").alert(d, true, NOW);
 
-        assertThat(text).startsWith("🕊 Recent match · 78/100")
-                .contains("&lt;script&gt;R&amp;D&lt;/script&gt;")
-                .contains("📍 Bengaluru, India · Remote · 3+ yrs");
+        assertThat(text).startsWith("🟢 <b>Strong match</b> · <i>from the last 2 days</i>\n")
+                .contains("<b>&lt;script&gt;R&amp;D&lt;/script&gt;</b>")
+                .contains("📍 Bengaluru, India · Remote\n🎓 3+ yrs  ·  ⏱ found 2 min ago")
+                .doesNotContain("<blockquote>"); // no skills to show
+    }
+
+    @Test
+    void withoutYearsOrSkillsTheLinesCollapseCleanly() {
+        Delivery d = new Delivery(delivery("T", List.of(), null, null, null, List.of(), List.of()).alert(), 42,
+                User.Status.ACTIVE, 10, "T", "Co", "https://x", null, NOW, null, List.of(), null, null, null, List.of(), null);
+
+        assertThat(new AlertFormatter("").alert(d, false, NOW)).endsWith("""
+                📍 Location not stated
+                ⏱ found just now
+
+                <blockquote><i>The posting doesn't list specific skills.</i></blockquote>""");
+    }
+
+    @Test
+    void tiersAndScoreBar() {
+        assertThat(AlertFormatter.tier(85)).isEqualTo("Excellent match");
+        assertThat(AlertFormatter.tierEmoji(85)).isEqualTo("🔥");
+        assertThat(AlertFormatter.tier(84)).isEqualTo("Strong match");
+        assertThat(AlertFormatter.tier(70)).isEqualTo("Strong match");
+        assertThat(AlertFormatter.tier(69)).isEqualTo("Good match");
+        assertThat(AlertFormatter.tierEmoji(40)).isEqualTo("🔵");
+        assertThat(AlertFormatter.bar(0)).isEqualTo("▱▱▱▱▱▱▱▱▱▱");
+        assertThat(AlertFormatter.bar(55)).isEqualTo("▰▰▰▰▰▰▱▱▱▱");
+        assertThat(AlertFormatter.bar(100)).isEqualTo("▰▰▰▰▰▰▰▰▰▰");
+    }
+
+    @Test
+    void theLogoComesFromTheCompanysDomainOrIsLeftOut() {
+        Delivery withDomain = delivery("T", List.of(), null, null, null, List.of(), List.of());
+        Delivery without = new Delivery(withDomain.alert(), 42, User.Status.ACTIVE, 10, "T", "Co", "https://x", null,
+                NOW, null, List.of(), null, null, null, List.of(), null);
+
+        assertThat(new AlertFormatter("").logoUrl(withDomain))
+                .isEqualTo("https://www.google.com/s2/favicons?sz=128&domain=example.com");
+        assertThat(new AlertFormatter("").logoUrl(without)).isNull();
     }
 
     @Test
@@ -62,7 +108,7 @@ class AlertFormatterTest {
         assertThat(links.get(1).url()).isEqualTo("https://prep.example.com/dashboard?role=Backend+Engineer+I"
                 + "&company=ExampleCo&skills=Java%2CSpring+Boot%2CPostgreSQL%2CKafka%2CDocker");
         List<InlineKeyboardButton> feedback = keyboard.inlineKeyboard().get(1);
-        assertThat(feedback).extracting(InlineKeyboardButton::text).containsExactly("👍 Relevant", "👎 Not relevant");
+        assertThat(feedback).extracting(InlineKeyboardButton::text).containsExactly("👍 Relevant", "👎 Not for me");
         assertThat(feedback).allSatisfy(b -> assertThat(b.callbackData().getBytes(StandardCharsets.UTF_8).length)
                 .isLessThanOrEqualTo(64));
     }
@@ -88,7 +134,9 @@ class AlertFormatterTest {
                 new DigestItem(Ids.newId(), 1, 42, "Backend Engineer", "Acme", "https://x.com/a?b=1&c=\"2\"", 62),
                 new DigestItem(Ids.newId(), 1, 42, "Data Engineer", "Beta", "https://y.com", 48)));
 
-        assertThat(text).contains("2 jobs", "1. <a href=\"https://x.com/a?b=1&amp;c=&quot;2&quot;\">Backend Engineer</a> — Acme · 62/100",
-                "2. <a href=\"https://y.com\">Data Engineer</a> — Beta · 48/100");
+        assertThat(text).startsWith("🌙 <b>Your evening digest</b>\n2 jobs from the last 24 hours, best first\n")
+                .contains("<b>1.</b> <a href=\"https://x.com/a?b=1&amp;c=&quot;2&quot;\">Backend Engineer</a>\n🏢 Acme  ·  🔵 62/100")
+                .contains("<b>2.</b> <a href=\"https://y.com\">Data Engineer</a>\n🏢 Beta  ·  🔵 48/100")
+                .endsWith("⚙️ Change that with /prefs");
     }
 }

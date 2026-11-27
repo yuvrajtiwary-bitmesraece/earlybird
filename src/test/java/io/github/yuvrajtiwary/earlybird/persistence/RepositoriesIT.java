@@ -86,6 +86,24 @@ class RepositoriesIT {
         assertThat(boards.findEnabled()).extracting(Board::id).contains(board.id());
     }
 
+    /** Issue #10: seed loading sets the company's domain, and an alert's delivery carries it for the logo. */
+    @Test
+    void theCompanyDomainIsSetOnceAndReachesTheAlertsDelivery() {
+        Board board = newBoard();
+        Posting posting = newPosting(board);
+        Alert alert = alert(newUser(), posting, Alert.Mode.INSTANT);
+        assertThat(alerts.insertIfAbsent(alert)).isTrue();
+        assertThat(alerts.findDelivery(alert.id()).orElseThrow().companyDomain()).isNull();
+
+        assertThat(boards.updateDomain(Source.GREENHOUSE, board.token(), "example.com")).isTrue();
+        assertThat(boards.updateDomain(Source.GREENHOUSE, board.token(), "example.com")).isFalse(); // unchanged
+        assertThat(alerts.findDelivery(alert.id()).orElseThrow().companyDomain()).isEqualTo("example.com");
+
+        // The column only takes a bare host name, because it ends up inside a logo URL.
+        assertThatThrownBy(() -> boards.updateDomain(Source.GREENHOUSE, board.token(), "https://example.com/x"))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+
     @Test
     void postingsRoundTripAndTheSameJobCannotBeInsertedTwice() {
         Posting posting = newPosting(newBoard());
