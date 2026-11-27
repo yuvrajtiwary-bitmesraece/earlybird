@@ -254,7 +254,7 @@ One section per build block: what was built, why, the alternatives, what breaks 
     - 290+ real postings tagged.
     - The 20:00 digest fired on time.
     - The real API exposed the schema limit, and real postings exposed three fallback-tagger bugs.
-  - A real instant alert in Telegram was still waiting for a matching new job at the time of writing: in ~75 minutes of US-morning ticks, every new job was senior or non-technical.
+  - A real instant alert in Telegram didn't come during Block 4's run: in ~75 minutes of ticks, every new job was senior or non-technical. It came on 2026-11-27, during Block 5's live run on Kafka: three real alerts (Databricks, Paytm ×2) arrived 18–27 s after the jobs were first seen.
 
 ### Why this design
 - **The database is the tagging queue.** Postings already live in a table, so a "needs tagging" marker plus `SKIP LOCKED` claims gives at-least-once processing that survives restarts, with nothing new to run. Batching 15 rows is easy from a table. From a stream it means buffering and committing offsets by hand. Kafka (Block 5) still carries the events; the queue stays in Postgres.
@@ -308,3 +308,75 @@ One section per build block: what was built, why, the alternatives, what breaks 
    - Nothing the user sees. Every Redis call goes through one guard; on the first failure it stops calling Redis for 30 seconds and the fallbacks answer.
    - The send rate is limited in memory, and daily caps are counted from the alerts table.
    - The cost is that with several instances the global rate becomes per-instance, so I keep the per-instance limit under Telegram's ceiling. It happened for real in the live run: Upstash dropped a connection mid-tagging, and the pipeline carried on.
+
+## Block 5 — Kafka event bus, dead letters and the outbox relay (2026-11-27)
+
+### What was built
+- **`KafkaEventBus`**, a second implementation of the same `EventBus` interface, chosen by `EVENT_BUS=kafka`. No module changed apart from where events are built.
+  - Producer: `acks=all`, idempotent, zstd, 20 ms linger, timeouts in seconds rather than minutes.
+  - One listener container per consumer group (the matcher's group reads two topics). Each event is handled synchronously, and its offset is committed only after the handler and its database transaction finish.
+- **Errors:** Spring Kafka's `DefaultErrorHandler` with a 1 s / 5 s / 30 s back-off, then a recoverer that publishes a `DeadLetter` (original topic, partition, offset, key, error, attempts, base64 payload) to `eb.dlq.v1`.
+  - Malformed events skip the retries.
+  - If the dead letter can't be written, the offset isn't committed.
+  - A Telegram 4xx on an alert now dead-letters the event too.
+- **`DeadLetterNotifier`** (group `eb-admin`) turns dead letters into admin notices. `/admin` shows the Kafka status, the dead-letter count and the Redis status.
+- **`KafkaMonitor`:**
+  - checks the five topics at startup (auto-creation is off) and the cluster every 30 s;
+  - health is `DEGRADED` while Kafka is unreachable, and publishing fails at once;
+  - the admin is told after 5 minutes;
+  - consumers that couldn't even be created are started once Kafka answers.
+- **Outbox relay** at the end of each tick. It republishes discovered postings and tag events that never reached the bus, and instant alerts still queued after 2 minutes. V5 added `posting_tags.event_published_at` and replaced an index that had silently covered every baseline posting.
+- **`scripts/KafkaPemsToEnv.java`** checks Aiven's three certificate files and writes them into `.env` as one-line PEM text, printing only OK/FAIL.
+- **Verified:**
+  - CI: 364 unit and 52 integration tests. `KafkaPipelineIT` runs against `apache/kafka:4.4.0`: the full pipeline, a poison message, a failing consumer's 4 attempts, a redelivered event, the relay, and a paused broker.
+  - Locally with Kafka unreachable: the app started, health was degraded and readiness up. That run also caught a migration bug (a duplicate index name) before CI did.
+  - Live on Aiven's free plan: the first tick found 579 postings and published 554. Gemini tagged 150 in the 2.5 minutes the app ran. The matcher handled 144 events from Kafka, and three real alerts reached Telegram 18–27 s after the jobs were first seen.
+
+### Why this design
+- **Same interface, two buses.** Local development needs no broker (the "only JDK 25" rule), while production gets durability and consumer groups. Modules can't tell which bus they're on, which is also what lets the Helm chart split roles into deployments later.
+- **At least once, made safe by idempotent consumers, not exactly once.** Kafka transactions would only cover Kafka. The real side effects are rows and Telegram messages, so each consumer de-duplicates where its effect happens:
+  - the matcher uses `processed_events` in the same transaction as its inserts;
+  - the notifier claims the alert row (`queued → sending`);
+  - the tagger's queue is the table itself.
+- **Commit after the transaction.** A crash between the database commit and the offset commit replays the event, which is harmless. The other order would lose it.
+- **Outbox-lite instead of a full transactional outbox.** The "published" marker lives on the row itself (no outbox table), and the relay rides the existing 3-minute tick. The cost: an event can be up to a few minutes late after a crash, and may go out twice, which consumers absorb.
+- **The spec's outbox had a gap.** A tag written while Kafka was down would never have reached the matcher, because the tagging queue (the description) is already cleared. So the tags got the same marker. Found by asking "what happens to each hop if Kafka is down", not by a failing test.
+- **Fail fast while Kafka is down.** Without the monitor's flag, every publish would wait out a 10 s metadata timeout, and a tick with 30 new postings would stall for minutes. With it, rows stay unpublished and the relay catches up.
+- **Kafka refuses to create clients for an unresolvable host.** A local test showed this. A powered-off Aiven service could look exactly like that, so client creation is lazy or retried, and the app never fails to start because of Kafka.
+- **Group ids carry the environment outside prod.** Aiven allows one free Kafka service, so dev and prod share topics. With the same group ids, a laptop would take partitions, and the events on them, away from production.
+- **No Boot Kafka auto-configuration.** With `spring-kafka` alone, the handful of Kafka beans exist only with `EVENT_BUS=kafka`. Subscriptions are registered in code because modules subscribe through the interface, not `@KafkaListener`.
+
+### Alternatives considered
+| Option | Why not |
+|---|---|
+| Kafka transactions / exactly-once | Only covers Kafka-to-Kafka; database rows and Telegram sends still need idempotency |
+| A separate outbox table plus Debezium | Another service to run; a marker column and the tick are enough at this volume |
+| Spring Boot's Kafka auto-configuration with `@KafkaListener` | Beans would exist even on the memory bus, and listeners would bypass the `EventBus` interface |
+| Spring's `DeadLetterPublishingRecoverer` as is | Publishes the raw record; the spec's `DeadLetter` envelope (error, attempts, base64 payload) is easier for a person to read |
+| Failing startup when topics are missing | One forgotten topic would take the bot and website down; a clear error plus `DEGRADED` keeps the rest working |
+| One consumer per topic per group | More consumers, threads and heartbeats on 0.1 CPU for no benefit at this volume |
+
+### What breaks first
+- **At 10×:**
+  - **Aiven's free throughput (250 KiB/s).** A catch-up like today's (579 postings × ~3 KB) is ~1.7 MB, a few seconds of budget, so it's fine.
+  - **The relay's batch of 100 per kind per tick.** After a long outage the backlog drains over several ticks; fine at 10×, slow at 100×.
+- **At 100×:**
+  - **Two partitions per topic cap parallelism** at two consumers per group across all instances. The notifier is the first to need more, which means a paid plan.
+  - **The free service powers off after 24 h without traffic**, and dev and prod sharing it stops being acceptable. A paid plan fixes both.
+  - **Per-record offset commits** become noticeable; batch acknowledgment with idempotent handlers would be the change.
+
+### Likely interview questions
+1. **"Kafka delivers at least once. How do you avoid duplicate alerts?"**
+   - By making every consumer idempotent where its side effect happens, not by exactly-once.
+   - The matcher inserts a `processed_events` row in the same transaction as the alerts it creates, so a second copy of the event does nothing. Alerts also have a unique (user, posting) key.
+   - The notifier claims the alert row before sending, so only one copy wins.
+   - A CI test sends the same event twice, deletes the alert in between, and checks it wasn't recreated.
+2. **"What happens if Kafka is down?"**
+   - The app keeps working: postings, tags and alerts are written to Postgres first.
+   - Publishing fails at once because a monitor knows Kafka is unreachable, and health says `DEGRADED` without touching readiness, so the platform doesn't restart the app.
+   - After 5 minutes the admin gets a Telegram notice. When Kafka returns, the outbox relay publishes everything never marked as published.
+   - I tested it by pausing the broker container in CI, and locally by pointing the app at a closed port.
+3. **"Why commit offsets after the database transaction rather than before?"**
+   - If I commit first and crash before the transaction, the event is lost.
+   - If I commit after and crash in between, the event is redelivered, and the idempotent consumer makes that harmless.
+   - So the order turns a possible loss into a possible duplicate, and duplicates are already handled.

@@ -4,7 +4,7 @@
 
 EarlyBird sends you a Telegram alert within minutes of a matching job going live on a company's careers page, with your match score and the skills you're missing.
 
-> **Status:** under construction. Blocks 1–4 of 13 are done: the project skeleton, polling 130 real job boards, the Telegram bot (onboarding, resume parsing, commands), and tagging, matching and alerts. Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
+> **Status:** under construction. Blocks 1–5 of 13 are done: the project skeleton, polling 130 real job boards, the Telegram bot (onboarding, resume parsing, commands), tagging, matching and alerts, and the Kafka event bus. Live links arrive with the deployment in Block 8. The full design is in [docs/earlybird-spec.md](docs/earlybird-spec.md); design decisions and trade-offs are in [docs/interview-notes.md](docs/interview-notes.md).
 
 ## How it works
 
@@ -155,6 +155,11 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 | 2026-11-24 | Tagging the backlog from the baseline plus new jobs | 275 postings in 20 batches. Gemini answered 4 batches (47 postings); 16 got 503 "high demand" after 3 tries and went to the keyword fallback | Laptop → Gemini API, IST evening |
 | 2026-11-24 | Memory with every module running (poller, tagging, matcher, notifier, bot) | 253 MB peak working set | Laptop, `-Xmx300m -XX:+UseSerialGC` |
 | 2026-11-24 | New postings, 18:45–20:00 IST | 16 new jobs, all senior or non-technical, so 0 matches (correct) | Laptop, ticks every 3 min |
+| 2026-11-27 | Startup with `EVENT_BUS=kafka` | 19.8 s; all 5 topics found, 4 consumer groups assigned partitions within 7 s | Laptop → Aiven free Kafka (Asia Pacific), client-certificate TLS |
+| 2026-11-27 | First tick after a two-day gap | 579 new postings in 53 s; 554 published to Kafka (the rest were reposts) | Same |
+| 2026-11-27 | Job first seen → instant alert sent, through Kafka | 18 s, 18 s and 27 s for the first three real alerts | Same; Gemini tagging 15 per call |
+| 2026-11-27 | Memory with every module and Kafka | 248 MB working set, 373 MB peak during the 579-posting catch-up, 74 threads | Same, `-Xmx300m -XX:+UseSerialGC` |
+| 2026-11-27 | Kafka unreachable at startup | App started (14.6 s), health `DEGRADED`, readiness `UP`, one log line per outage | Laptop, Kafka pointed at a closed port |
 
 Production figures (Render, 0.1 CPU / 512 MB) will be added in Block 8.
 
