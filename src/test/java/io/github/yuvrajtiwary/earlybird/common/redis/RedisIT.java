@@ -141,4 +141,33 @@ class RedisIT {
         assertThat(guard.coolingDown()).isTrue(); // next calls skip Redis for a while instead of timing out each time
         deadFactory.destroy();
     }
+
+    /** Spec 3.3: SET NX PX, one holder at a time, and only the owner can release. */
+    @Test
+    void theRedisLockIsExclusiveAndOnlyTheOwnerReleasesIt() {
+        var fallback = new io.github.yuvrajtiwary.earlybird.ops.DistributedLock() {
+            int calls;
+
+            @Override
+            public java.util.Optional<Handle> tryAcquire(String name, Duration ttl) {
+                calls++;
+                return java.util.Optional.empty();
+            }
+        };
+        var one = new io.github.yuvrajtiwary.earlybird.ops.RedisLock(redis, guard, fallback);
+        var two = new io.github.yuvrajtiwary.earlybird.ops.RedisLock(redis, guard, fallback);
+
+        var held = one.tryAcquire("tick", Duration.ofMinutes(1));
+        assertThat(held).isPresent();
+        assertThat(two.tryAcquire("tick", Duration.ofMinutes(1))).as("another instance").isEmpty();
+        assertThat(redis.getExpire(guard.key("lock:tick"))).isBetween(1L, 60L); // the lease is set
+
+        held.get().close();
+        var again = two.tryAcquire("tick", Duration.ofMinutes(1));
+        assertThat(again).isPresent();
+        held.get().close(); // a stale handle must not release the new holder's lock
+        assertThat(one.tryAcquire("tick", Duration.ofMinutes(1))).isEmpty();
+        again.get().close();
+        assertThat(fallback.calls).as("Redis was up, so the database was never asked").isZero();
+    }
 }

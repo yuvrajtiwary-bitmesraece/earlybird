@@ -2,8 +2,6 @@ package io.github.yuvrajtiwary.earlybird.config;
 
 import io.github.yuvrajtiwary.earlybird.common.RateLimiter;
 import io.github.yuvrajtiwary.earlybird.common.TokenBucketRateLimiter;
-import io.github.yuvrajtiwary.earlybird.ops.DistributedLock;
-import io.github.yuvrajtiwary.earlybird.ops.InMemoryDistributedLock;
 import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -22,11 +20,6 @@ class CoreConfig {
     @Bean
     Clock clock() {
         return Clock.systemUTC();
-    }
-
-    @Bean
-    DistributedLock distributedLock(Clock clock) {
-        return new InMemoryDistributedLock(clock);
     }
 
     /** The default limiter: in-process (per-user and per-chat limits). See RedisConfig for the shared one. */
