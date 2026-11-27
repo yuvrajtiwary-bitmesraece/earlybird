@@ -44,6 +44,19 @@ jobs:
       - name: Docker image builds
         run: docker build --tag earlybird:ci .
 
+      - name: Docker image starts the application
+        # Runs the image's real entrypoint, user and JVM flags. With no configuration the prod profile stops
+        # during startup, which is expected; what matters is that Spring Boot got far enough to log its start.
+        # A wrong jar path or a broken entrypoint fails before that line (issue #1).
+        run: |
+          set +e
+          timeout 120 docker run --rm earlybird:ci > boot.log 2>&1
+          status=$?
+          set -e
+          tail -n 20 boot.log
+          echo "Container exited with $status"
+          grep -q "Starting EarlyBirdApplication" boot.log
+
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
