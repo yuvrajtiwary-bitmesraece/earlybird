@@ -6,7 +6,7 @@ import io.github.yuvrajtiwary.earlybird.common.redis.RedisGuard;
 import io.github.yuvrajtiwary.earlybird.enrich.GeminiBudget;
 import io.github.yuvrajtiwary.earlybird.events.KafkaMonitor;
 import io.github.yuvrajtiwary.earlybird.ops.DistributedLock;
-import io.github.yuvrajtiwary.earlybird.ops.InternalScheduler;
+import io.github.yuvrajtiwary.earlybird.ops.InternalJobs;
 import io.github.yuvrajtiwary.earlybird.persistence.OpsStatsRepository;
 import io.github.yuvrajtiwary.earlybird.persistence.TickRepository;
 import io.github.yuvrajtiwary.earlybird.poller.TickService;
@@ -95,7 +95,7 @@ class AdminCommands {
             api.sendMessage(chatId, "At most one manual tick a minute.", null);
             return;
         }
-        var handle = lock.tryAcquire(InternalScheduler.TICK_LOCK, InternalScheduler.TICK_LOCK_TTL);
+        var handle = lock.tryAcquire(InternalJobs.Job.TICK.lockName(), InternalJobs.Job.TICK.lease());
         if (handle.isEmpty()) {
             api.sendMessage(chatId, "A tick is already running.", null);
             return;

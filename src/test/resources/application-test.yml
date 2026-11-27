@@ -3,8 +3,13 @@
 # No real secrets, and no calls to real services.
 earlybird:
   env: test
-  # No scheduler role: tests trigger checks themselves, nothing runs on a timer.
-  roles: web,bot,poller,enricher,matcher,notifier
+  # The scheduler role in external mode: /internal/* endpoints exist (QStash's way in), but nothing runs on a
+  # timer, so tests trigger checks themselves.
+  roles: web,bot,poller,enricher,matcher,notifier,scheduler
+  scheduler:
+    mode: external
+    qstash-current-signing-key: sig_test_current_0123456789abcdef
+    qstash-next-signing-key: sig_test_next_0123456789abcdef
   db-schema: earlybird
   public-base-url: https://earlybird.test
   telegram:

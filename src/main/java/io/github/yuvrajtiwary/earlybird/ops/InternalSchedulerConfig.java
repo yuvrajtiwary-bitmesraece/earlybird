@@ -2,9 +2,6 @@ package io.github.yuvrajtiwary.earlybird.ops;
 
 import io.github.yuvrajtiwary.earlybird.config.ConditionalOnRole;
 import io.github.yuvrajtiwary.earlybird.config.Role;
-import io.github.yuvrajtiwary.earlybird.alerts.DigestService;
-import io.github.yuvrajtiwary.earlybird.poller.TickService;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,8 +15,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 class InternalSchedulerConfig {
 
     @Bean
-    InternalScheduler internalScheduler(DistributedLock lock, ObjectProvider<TickService> ticks,
-            ObjectProvider<DigestService> digests) {
-        return new InternalScheduler(lock, ticks, digests);
+    InternalScheduler internalScheduler(InternalJobs jobs) {
+        return new InternalScheduler(jobs);
     }
 }
