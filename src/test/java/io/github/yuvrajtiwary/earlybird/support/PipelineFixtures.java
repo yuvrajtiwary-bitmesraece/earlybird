@@ -65,6 +65,19 @@ public abstract class PipelineFixtures {
     @Autowired protected WireMockServer fake;
     @Value("${local.server.port}") protected int port;
 
+    /**
+     * Every IT class shares one database, and some (PollerIT) leave new postings that were never tagged. Tagged
+     * here, each would match this class's fresher users and could use up a user's daily cap before the test's own
+     * job arrives (issue #3). Closing them first means the matcher, which re-reads the posting, ignores them.
+     */
+    @BeforeEach
+    protected void closeOtherTestsUntaggedPostings() {
+        jdbc.sql("""
+                update postings set closed_at = now()
+                where closed_at is null and not exists (select 1 from posting_tags t where t.posting_id = postings.id)
+                """).update();
+    }
+
     @BeforeEach
     protected void stubTelegramAndGemini() {
         fake.stubFor(post(urlPathMatching("/bot[^/]+/sendMessage")).willReturn(okJson(
