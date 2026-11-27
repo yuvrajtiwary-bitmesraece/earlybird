@@ -1,5 +1,8 @@
 package io.github.yuvrajtiwary.earlybird.matching;
 
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
@@ -12,6 +15,7 @@ import io.github.yuvrajtiwary.earlybird.persistence.User;
 import io.github.yuvrajtiwary.earlybird.support.IntegrationTest;
 import io.github.yuvrajtiwary.earlybird.support.PipelineFixtures;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -96,6 +100,36 @@ class PipelineIT extends PipelineFixtures {
         tap(keen, "fb:r:" + Base62.encode(sent.id()));
 
         await().untilAsserted(() -> assertThat(alert(keen, postingId).feedback()).isEqualTo(Alert.Feedback.RELEVANT));
+    }
+
+    /**
+     * Issue #3: another test class left more untagged, matching jobs than a user's daily cap (10). Once closed by
+     * the fixture, tagging them later must not use up this test's user: its own job still arrives instantly.
+     */
+    @Test
+    void untaggedJobsLeftByOtherTestsDoNotReachThisTestsUsers() throws Exception {
+        Board other = boardWithBaseline();
+        List<String> leftover = new ArrayList<>();
+        for (int i = 0; i < 11; i++) {
+            String id = String.valueOf(5000 + i);
+            leftover.add("{\"id\": " + id + ", \"title\": \"Java Developer " + i + "\", \"absolute_url\": "
+                    + "\"https://jobs.example.com/" + id + "\", \"location\": {\"name\": \"Bengaluru, India\"}, "
+                    + "\"first_published\": \"" + Instant.now() + "\"}");
+            fake.stubFor(get(urlPathEqualTo(path(other) + "/" + id)).willReturn(okJson("{\"id\": " + id
+                    + ", \"content\": \"Java and Spring Boot on PostgreSQL. Freshers welcome.\", \"departments\": []}")));
+        }
+        stubList(other, "W/\"leftover\"", leftover.toArray(String[]::new));
+        checker.check(reload(other));
+        closeOtherTestsUntaggedPostings(); // what the fixture does before each test
+
+        User keen = activeUser(55);
+        Board board = boardWithBaseline();
+        UUID postingId = newJob(board, "501", "Backend Engineer (Java)");
+        assertThat(tagging.drain()).as("the leftovers are tagged too, just closed").isGreaterThanOrEqualTo(12);
+
+        Alert sent = awaitAlert(keen, postingId, Alert.Status.SENT);
+        assertThat(sent.mode()).isEqualTo(Alert.Mode.INSTANT);
+        assertThat(messagesTo(keen)).singleElement();
     }
 
     /**
