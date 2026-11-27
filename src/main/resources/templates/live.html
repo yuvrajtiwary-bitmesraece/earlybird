@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Live postings', true)}"></head>
+<body>
+<header th:replace="~{fragments :: nav}"></header>
+<main>
+  <h1>Latest postings</h1>
+  <p class="muted">The 50 newest open jobs found on the boards we check. This page refreshes every minute.</p>
+  <nav class="filters">
+    <a href="/live" th:classappend="${selected == null} ? 'on'">All</a>
+    <a th:each="r : ${roles}" th:href="@{/live(role=${r.key})}" th:text="${r.value}"
+       th:classappend="${selected == r.key} ? 'on'">Backend</a>
+  </nav>
+  <p th:if="${rows.isEmpty()}" class="muted">Nothing yet for this role.</p>
+  <ul class="postings">
+    <li th:each="p : ${rows}">
+      <a class="title" th:href="${p.url()}" th:text="${p.title()}" rel="noopener nofollow">Backend Engineer</a>
+      <span class="company" th:text="${p.company()}">ExampleCo</span>
+      <span class="meta">
+        <span th:text="${p.location()}">Bengaluru</span>
+        <span th:if="${!p.tags().isEmpty()}" class="tag" th:text="${p.tags()}">Junior · Hybrid</span>
+        <span class="found" th:text="'found ' + ${p.found()}">found 4 min ago</span>
+      </span>
+    </li>
+  </ul>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

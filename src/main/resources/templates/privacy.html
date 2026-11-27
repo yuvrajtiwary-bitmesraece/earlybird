@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Privacy', false)}"></head>
+<body>
+<header th:replace="~{fragments :: nav}"></header>
+<main class="prose">
+  <h1>Privacy</h1>
+
+  <h2>What we store</h2>
+  <ul>
+    <li>Your Telegram user id, chat id, first name and username.</li>
+    <li>Your preferences: roles, cities, experience, whether you want internships, minimum score and daily cap.</li>
+    <li>From your resume, only the extracted skills, years of experience, graduation year and suggested roles, plus a
+      fingerprint (SHA-256) of the file. <strong>The resume file and its text are never stored.</strong></li>
+    <li>The alerts we sent you and your 👍/👎 on them.</li>
+  </ul>
+
+  <h2>Gemini (Google's AI)</h2>
+  <ul>
+    <li>Your resume is read in memory. Emails, phone numbers, links, addresses and the name line are removed first, and
+      only the rest is sent to Gemini to extract skills and experience.</li>
+    <li>Job descriptions from public career pages are sent to Gemini to tag role, seniority, location and skills.</li>
+  </ul>
+
+  <h2>Where data lives</h2>
+  <ul>
+    <li>The database: Supabase, in Singapore.</li>
+    <li>Short-lived counters (daily alert caps, send rate): Upstash Redis.</li>
+    <li>Events between parts of the app: Aiven Kafka, kept only for its fixed retention (7 days).</li>
+  </ul>
+
+  <h2>How long</h2>
+  <ul>
+    <li>Alerts: 180 days. Job postings: 60 days after they close.</li>
+    <li>Technical records (processed events, Telegram update ids, check logs): 2 to 30 days.</li>
+    <li>Your account and preferences: until you delete them.</li>
+  </ul>
+
+  <h2>Deleting everything</h2>
+  <p>Send <code>/delete</code> to the bot. It deletes your account, preferences, extracted resume facts, alerts and
+    conversation state at once, plus your counters in Redis, and confirms. Nothing is kept.</p>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

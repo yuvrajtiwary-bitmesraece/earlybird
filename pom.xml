@@ -63,6 +63,15 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+        <!-- The read-only website (Block 7): server-rendered pages, and a 60-second cache in front of the stats. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-thymeleaf</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
         <!-- Spring for Apache Kafka without Boot's Kafka auto-configuration: the bus is chosen at runtime by
              EVENT_BUS, so the Kafka beans are created only for EVENT_BUS=kafka (events/EventBusConfig). -->
         <dependency>

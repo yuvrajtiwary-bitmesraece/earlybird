@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Job alerts on Telegram', false)}"></head>
+<body>
+<header th:replace="~{fragments :: nav}"></header>
+<main>
+  <h1>Hear about new jobs before everyone else.</h1>
+  <p class="lead">EarlyBird checks company career pages every 3 minutes and sends you a Telegram alert when a job
+    that fits you goes live, with your match score and the skills you're missing.</p>
+
+  <ol class="steps">
+    <li><strong>Open the bot</strong> and pick your roles, cities and experience.</li>
+    <li><strong>Upload your resume</strong> (optional): we keep only your skills and years, never the file.</li>
+    <li><strong>Get alerts</strong> within minutes, or one digest at 20:00.</li>
+  </ol>
+
+  <p class="actions">
+    <a class="button" th:href="${telegramUrl}">Open in Telegram</a>
+    <a class="button secondary" th:href="${githubUrl}">GitHub</a>
+  </p>
+
+  <section class="numbers">
+    <div><span class="number" th:text="${home.boards()}">0</span><span>boards checked</span></div>
+    <div><span class="number" th:text="${home.postings24h()}">0</span><span>new postings, last 24 h</span></div>
+    <div><span class="number" th:text="${home.alerts7d()}">0</span><span>alerts sent, last 7 days</span></div>
+    <div><span class="number" th:text="${home.p95Delivery()}">–</span><span>p95 delivery time</span></div>
+  </section>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>

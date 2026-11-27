@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:fragment="head(title, refresh)">
+  <meta charset="utf-8">
+  <meta th:if="${refresh}" http-equiv="refresh" content="60">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title th:text="${title} + ' · EarlyBird'">EarlyBird</title>
+  <meta name="description" content="Telegram alerts within minutes of a matching job going live, for freshers in India.">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header th:fragment="nav" class="nav">
+  <a class="brand" href="/">🐦 EarlyBird</a>
+  <nav>
+    <a href="/live">Live</a>
+    <a href="/stats">Stats</a>
+    <a href="/status">Status</a>
+    <a href="/privacy">Privacy</a>
+  </nav>
+</header>
+<footer th:fragment="footer" class="footer">
+  <span>Times in IST.</span>
+  <a th:href="${githubUrl}">Source on GitHub</a>
+</footer>
+</body>
+</html>

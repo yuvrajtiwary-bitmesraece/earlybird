@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments :: head('Status', false)}"></head>
+<body>
+<header th:replace="~{fragments :: nav}"></header>
+<main>
+  <h1>Status</h1>
+  <table>
+    <tr><td>Database</td><td th:text="${status.database()} ? 'OK' : 'unreachable'">OK</td></tr>
+    <tr><td>Redis</td><td th:text="${status.redis()}">OK</td></tr>
+    <tr><td>Kafka</td><td th:text="${status.kafka()}">OK</td></tr>
+    <tr><td>Last successful check of the boards</td><td th:text="${status.lastTick()}">27 Nov, 12:00 IST</td></tr>
+    <tr><td>Gemini budget</td><td th:text="${status.gemini()}">400 of 400 calls left today</td></tr>
+  </table>
+  <p class="muted">Updated at most once a minute.</p>
+</main>
+<footer th:replace="~{fragments :: footer}"></footer>
+</body>
+</html>
