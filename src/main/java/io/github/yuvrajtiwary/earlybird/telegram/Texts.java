@@ -15,110 +15,151 @@ import java.util.List;
 /**
  * Every message the bot sends, in one place, as Telegram HTML. Anything not written by us (names, skills)
  * goes through {@link io.github.yuvrajtiwary.earlybird.common.Html#escape}.
+ *
+ * <p>House style (issue #10): quiet and plain. A bold headline, short plain lines, a blank line between parts,
+ * italics for asides. No emoji in the text; the alert's logo card carries the visual weight.
  */
 final class Texts {
 
     static final String CONSENT = "<i>Your resume text, with email, phone and links removed, is sent to Google's "
             + "Gemini API to extract your skills. The file isn't stored. /delete erases everything.</i>";
 
+    static final int STEPS = 5;
+    /** A profile card shows this many skills, then "+N more", so a 40-skill resume doesn't swamp it. */
+    static final int SKILLS_IN_CARD = 10;
+
     private Texts() {}
+
+    // ------------------------------------------------------------------------------------ onboarding
 
     static String welcome(String firstName) {
         String name = firstName == null || firstName.isBlank() ? "" : ", " + escape(firstName);
-        return "🐦 <b>Welcome to EarlyBird" + name + "!</b>\n\n"
-                + "I watch the careers pages of 130 companies and message you within minutes when a job that "
-                + "fits you goes live, with your match score and the skills you're missing.\n\n"
-                + "🔒 <b>Privacy:</b> I keep your Telegram name, your preferences and the skills from your resume "
-                + "(never the file itself). /delete erases everything, any time.\n\n"
-                + "Let's set you up. It takes about a minute.";
+        return "<b>Welcome to EarlyBird" + name + "</b>\n\n"
+                + "I watch the careers pages of 130 companies and message you within minutes when a job that fits "
+                + "you goes live, with your match score and the skills you're missing.\n\n"
+                + "<i>I keep only your Telegram name, your preferences and the skills from your resume, never the "
+                + "file. /delete erases everything, any time.</i>\n\n"
+                + "Setup takes about a minute.";
+    }
+
+    /** "<b>Roles</b> · step 1 of 5". The first line is what stays once the step is answered. */
+    static String step(int n, String name) {
+        return "<b>" + name + "</b> · step " + n + " of " + STEPS;
     }
 
     static String stepRoles() {
-        return "<b>Step 1 of 5 · Roles</b>\nWhich kinds of roles do you want? Pick all that fit, then tap <b>Done</b>.";
+        return step(1, "Roles") + "\nWhich kinds of roles do you want? Pick all that fit, then tap Done.";
     }
 
     static String stepLocations() {
-        return "<b>Step 2 of 5 · Locations</b>\nWhere can you work? Pick all that fit, then tap <b>Done</b>.";
+        return step(2, "Locations") + "\nWhere can you work? Pick all that fit, then tap Done.";
     }
 
     static String stepExperience() {
-        return "<b>Step 3 of 5 · Experience</b>\nHow much full-time work experience do you have?";
+        return step(3, "Experience") + "\nHow much full-time work experience do you have?";
     }
 
     static String stepInternships() {
-        return "<b>Step 4 of 5 · Internships</b>\nShould I include internships?";
+        return step(4, "Internships") + "\nShould I include internships?";
     }
 
     static String stepResume() {
-        return "<b>Step 5 of 5 · Resume</b>\nSend your resume as a <b>PDF</b> and I'll pick out your skills, so I "
-                + "can score each job and tell you what you're missing.\n\n" + CONSENT;
-    }
-
-    static String uploadPrompt() {
-        return "📄 Send your resume as a <b>PDF</b> (up to 5 MB).\n\n" + CONSENT;
+        return step(5, "Resume") + "\nSend your resume as a PDF and I'll pick out your skills, so I can score each "
+                + "job and tell you what you're missing.\n\n" + CONSENT;
     }
 
     static String alertsOn(Profile p) {
-        return "✅ <b>Alerts are on.</b>\n\n" + profileLines(p)
-                + "\nWhen a matching job goes live, I'll message you here.\n"
-                + "Change anything with /prefs or /skills · /help lists all commands.";
+        return "<b>You're all set. Alerts are on.</b>\n\n"
+                + profileCard(p) + "\n\n"
+                + "I'll message you here when a matching job goes live.\n"
+                + "<i>/prefs to change anything · /help for all commands</i>";
     }
+
+    // ------------------------------------------------------------------------------------ preferences
 
     static String prefs(Profile p) {
-        return "⚙️ <b>Your preferences</b>\n\n" + profileLines(p)
-                + "<b>Instant alert threshold:</b> " + p.minScore() + "/100\n"
-                + "<b>Daily cap:</b> " + p.dailyCap() + " instant alerts\n\n"
-                + "Tap what you'd like to change:";
+        return "<b>Your preferences</b>\n\n"
+                + profileCard(p) + "\n"
+                + "Instant alerts from: " + p.minScore() + "% match\n"
+                + "Daily cap: " + p.dailyCap() + " alerts\n\n"
+                + "<i>Tap what you'd like to change.</i>";
     }
 
-    private static String profileLines(Profile p) {
+    private static String profileCard(Profile p) {
         String skills = p.skills().isEmpty()
-                ? "none yet. Send /upload with your resume for match scores."
-                : escape(String.join(", ", p.skills()));
-        return "<b>Roles:</b> " + roles(p.roles()) + "\n"
-                + "<b>Locations:</b> " + locations(ProfileService.locations(p)) + "\n"
-                + "<b>Experience:</b> " + Labels.experience(p.yearsExperience()) + "\n"
-                + "<b>Internships:</b> " + (p.includeInternships() ? "included" : "not included") + "\n"
-                + "<b>Skills:</b> " + skills + "\n";
+                ? "none yet, send /upload with your resume"
+                : skillList(p.skills(), SKILLS_IN_CARD);
+        return "Roles: " + roles(p.roles()) + "\n"
+                + "Locations: " + locations(ProfileService.locations(p)) + "\n"
+                + "Experience: " + Labels.experience(p.yearsExperience()) + "\n"
+                + "Internships: " + (p.includeInternships() ? "included" : "not included") + "\n"
+                + "Skills: " + skills;
+    }
+
+    static String editRoles() {
+        return "<b>Roles</b>\nPick all that fit, then tap Done.";
+    }
+
+    static String editLocations() {
+        return "<b>Locations</b>\nPick all that fit, then tap Done.";
+    }
+
+    static String editExperience() {
+        return "<b>Experience</b>\nHow much full-time work experience do you have?";
+    }
+
+    static String editInternships() {
+        return "<b>Internships</b>\nShould I include internships?";
     }
 
     static String minScorePrompt() {
-        return "<b>Instant alert threshold</b>\nJobs scoring at least this much (out of 100) are sent at once; "
-                + "lower matches (from 40) wait for the 20:00 digest.";
+        return "<b>Instant alert threshold</b>\n"
+                + "Jobs matching at least this much reach you at once. Lower matches, from 40%, wait for the "
+                + "8 PM digest.";
     }
 
     static String dailyCapPrompt() {
-        return "<b>Daily cap</b>\nThe most instant alerts per day. Extra matches go to the 20:00 digest.";
+        return "<b>Daily cap</b>\nThe most instant alerts you'll get in a day. Extra matches wait for the 8 PM digest.";
+    }
+
+    // ------------------------------------------------------------------------------------ resume and skills
+
+    static String uploadPrompt() {
+        return "<b>Upload your resume</b>\nSend it as a PDF, up to 5 MB.\n\n" + CONSENT;
     }
 
     static String resumeRead(ResumeFacts facts, double chosenYears) {
         StringBuilder text = new StringBuilder();
         if (facts.skills().isEmpty()) {
-            text.append("📄 I read your resume but couldn't find specific skills. Add them with "
+            text.append("<b>Resume read</b>\nI couldn't find specific skills in it. Add them with "
                     + "<code>/skills add Java, SQL</code>.");
         } else {
-            text.append("📄 <b>Got it.</b> I found ").append(facts.skills().size()).append(" skills:\n")
-                    .append(escape(String.join(", ", facts.skills())));
+            text.append("<b>Resume read: ").append(facts.skills().size())
+                    .append(facts.skills().size() == 1 ? " skill" : " skills").append("</b>\n")
+                    .append(skillList(facts.skills(), Integer.MAX_VALUE));
         }
-        text.append("\n\n");
+        StringBuilder details = new StringBuilder();
         if (facts.graduationYear() != null) {
-            text.append("<b>Graduation:</b> ").append(facts.graduationYear()).append("\n");
+            details.append("Graduation: ").append(facts.graduationYear()).append("\n");
         }
         if (facts.yearsExperience() != null) {
-            text.append("<b>Full-time experience on the resume:</b> about ")
+            details.append("Full-time experience on the resume: about ")
                     .append(formatYears(facts.yearsExperience())).append("\n");
             if (Math.abs(facts.yearsExperience() - chosenYears) >= 1.0) {
-                text.append("You picked <i>").append(Labels.experience(chosenYears))
-                        .append("</i>; change it in /prefs if that's not right.\n");
+                details.append("<i>You picked \"").append(Labels.experience(chosenYears))
+                        .append("\". Change it in /prefs if that's not right.</i>\n");
             }
         }
-        text.append("\nFix anything with <code>/skills add Kafka</code> or <code>/skills remove PHP</code>.");
-        return text.toString();
+        if (!details.isEmpty()) {
+            text.append("\n\n").append(details.toString().strip());
+        }
+        return text.append("\n\n<i>Fix anything with</i> <code>/skills add Kafka</code> <i>or</i> "
+                + "<code>/skills remove PHP</code>").toString();
     }
 
     static String sameResume(Profile p) {
-        return "📄 That's the same resume as last time, so nothing changed. Your skills: "
-                + (p.skills().isEmpty() ? "none" : escape(String.join(", ", p.skills())));
+        return "<b>Same resume as last time</b>, so nothing changed.\n"
+                + (p.skills().isEmpty() ? "No skills saved." : "Skills: " + skillList(p.skills(), Integer.MAX_VALUE));
     }
 
     static String resumeProblem(ResumeException.Reason reason) {
@@ -133,68 +174,81 @@ final class Texts {
         };
     }
 
-    static String skills(List<String> skills) {
-        if (skills.isEmpty()) {
-            return "🧰 You have no skills saved yet.\n\nAdd some: <code>/skills add Java, Spring Boot, SQL</code>\n"
-                    + "Or send /upload and I'll read them from your resume.";
-        }
-        return "🧰 <b>Your skills (" + skills.size() + "):</b>\n" + escape(String.join(", ", skills)) + "\n\n"
-                + "<code>/skills add Kafka, Docker</code> · <code>/skills remove PHP</code>";
+    static String uploadCancelled() {
+        return "Upload cancelled.";
     }
+
+    static String skills(List<String> skills) {
+        String edit = "<i>Edit with</i> <code>/skills add Kafka, Docker</code> <i>or</i> <code>/skills remove PHP</code>";
+        if (skills.isEmpty()) {
+            return "<b>Your skills</b>\nNone saved yet. Send /upload and I'll read them from your resume.\n\n" + edit;
+        }
+        return "<b>Your skills (" + skills.size() + ")</b>\n" + skillList(skills, Integer.MAX_VALUE) + "\n\n" + edit;
+    }
+
+    // ------------------------------------------------------------------------------------ stats and help
 
     static String stats(UserStats s) {
         if (s.total() == 0) {
-            return "📊 <b>Your last 7 days</b>\nNo alerts yet. Jobs that match you will show up here.";
+            return "<b>Your last 7 days</b>\nNo alerts yet. Jobs that match you will show up here.";
         }
-        StringBuilder text = new StringBuilder("📊 <b>Your last 7 days</b>\n")
-                .append("<b>Alerts:</b> ").append(s.total()).append(" (").append(s.instant()).append(" instant, ")
-                .append(s.digest()).append(" in digests)\n");
+        StringBuilder text = new StringBuilder("<b>Your last 7 days</b>\n")
+                .append(s.total()).append(s.total() == 1 ? " alert: " : " alerts: ")
+                .append(s.instant()).append(" instant, ").append(s.digest()).append(" in digests");
         int rated = s.relevant() + s.notRelevant();
         if (rated > 0) {
-            text.append("<b>Alert relevance:</b> ").append(s.relevant()).append(" of ").append(rated)
-                    .append(" rated 👍\n");
+            text.append("\n").append(s.relevant()).append(" of ").append(rated).append(" rated relevant");
         }
         if (s.mostMissingSkill() != null) {
-            text.append("<b>Skill you're most often missing:</b> ").append(escape(s.mostMissingSkill())).append("\n");
+            text.append("\nMost-missed skill: ").append(escape(s.mostMissingSkill()));
         }
         return text.toString();
     }
 
     static String help() {
         return """
-                🐦 <b>EarlyBird commands</b>
-                /prefs – roles, locations, experience, alert threshold, daily cap
+                <b>Commands</b>
+                /prefs – roles, locations, experience, threshold
                 /skills – see or edit your skills
-                /upload – read skills from your resume (PDF)
-                /pause – stop alerts for now · /unpause – start again
+                /upload – read skills from your resume
+                /pause – stop alerts for now
+                /unpause – start them again
                 /stats – your last 7 days
                 /delete – erase everything about you
                 /cancel – stop what you're doing""";
     }
 
+    // ------------------------------------------------------------------------------------ account
+
     static String confirmDelete() {
-        return "⚠️ This permanently deletes your profile, preferences, skills and alert history. There's no undo.";
+        return "<b>Delete everything?</b>\n"
+                + "This permanently erases your profile, preferences, skills and alert history. There's no undo.";
     }
 
     static String deleted() {
-        return "🗑 Done. Everything EarlyBird stored about you has been deleted. If you ever want alerts again, "
-                + "send /start.";
+        return "<b>Done.</b> Everything EarlyBird stored about you has been deleted.\n"
+                + "<i>Send /start if you ever want alerts again.</i>";
     }
 
+    static String keptEverything() {
+        return "Kept everything. Nothing was deleted.";
+    }
+
+    /** Also shown as a callback toast, which is plain text: no HTML here. */
     static String needStart() {
         return "Send /start to set up EarlyBird.";
     }
 
     static String finishSetupFirst() {
-        return "Let's finish setting up first. Send /start to continue where you left off.";
+        return "Let's finish setting up first. Send /start to pick up where you left off.";
     }
 
     static String paused() {
-        return "⏸ Alerts paused. Send /unpause to turn them back on.";
+        return "<b>Alerts paused.</b>\nI'll stay quiet until you send /unpause.";
     }
 
     static String unpaused() {
-        return "▶️ Alerts are back on.";
+        return "<b>Alerts are back on.</b>\nI'll message you when a matching job goes live.";
     }
 
     static String unknownCommand() {
@@ -209,9 +263,12 @@ final class Texts {
         return "To upload a resume, send /upload first.";
     }
 
+    /** Also shown as a callback toast, which is plain text: no HTML here. */
     static String slowDown() {
         return "You're going quickly. Give me a few seconds.";
     }
+
+    // ------------------------------------------------------------------------------------ pieces
 
     static String roles(Collection<RoleCategory> roles) {
         return roles.isEmpty() ? "none" : String.join(", ", roles.stream().map(Labels::role).toList());
@@ -219,6 +276,12 @@ final class Texts {
 
     static String locations(Collection<LocationChoice> locations) {
         return locations.isEmpty() ? "none" : String.join(", ", locations.stream().map(LocationChoice::label).toList());
+    }
+
+    /** "Java, Spring Boot, SQL", escaped; past {@code max}, "… +N more". */
+    static String skillList(List<String> skills, int max) {
+        String shown = escape(String.join(", ", skills.size() > max ? skills.subList(0, max) : skills));
+        return skills.size() > max ? shown + " +" + (skills.size() - max) + " more" : shown;
     }
 
     static String formatYears(double years) {

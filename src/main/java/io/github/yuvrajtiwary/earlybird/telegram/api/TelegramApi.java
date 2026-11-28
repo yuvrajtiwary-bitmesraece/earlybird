@@ -64,11 +64,21 @@ public class TelegramApi {
     // ------------------------------------------------------------------------------------ messages
 
     public Message sendMessage(long chatId, String html, InlineKeyboardMarkup keyboard) {
+        return sendMessage(chatId, html, keyboard, null);
+    }
+
+    /**
+     * @param previewImageUrl shown as a large picture above the text (alerts use the company's logo card), or null
+     *                        for no preview. Links inside the text never get a preview of their own either way.
+     */
+    public Message sendMessage(long chatId, String html, InlineKeyboardMarkup keyboard, String previewImageUrl) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("chat_id", chatId);
         params.put("text", truncate(html));
         params.put("parse_mode", "HTML");
-        params.put("link_preview_options", Map.of("is_disabled", true));
+        params.put("link_preview_options", previewImageUrl == null
+                ? Map.of("is_disabled", true)
+                : Map.of("url", previewImageUrl, "prefer_large_media", true, "show_above_text", true));
         if (keyboard != null) {
             params.put("reply_markup", keyboard);
         }

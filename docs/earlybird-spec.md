@@ -205,7 +205,7 @@ One `JobSource` implementation per source.
   3. For open postings missing from `current`, increment `missing_count`, and close the posting when it reaches 2. Only do this after a successful response.
   4. Suspicious-empty guard: if a board that had 5 or more jobs suddenly returns 0, close nothing and count it as a failure, unless it happens 3 checks in a row.
 - **Reposts:** `content_hash = sha256(lower(company) | lower(title) | normalized location | first 1,000 chars of plain description)`. If the same hash was seen in the last 30 days under a different ID, set `is_repost = true` and don't alert.
-- **Seed list:** `src/main/resources/boards/seed-boards.csv` (`source,token,company`) with about 150 companies that hire in India or remote, loaded idempotently at startup. Add a `validate-boards` command (for example `java -jar app.jar --validate-boards`, which runs without starting the web server). It calls each board and writes a report; drop invalid tokens. Target at least 120 valid boards.
+- **Seed list:** `src/main/resources/boards/seed-boards.csv` (`source,token,domain,company`; the domain was added for logos in issue #10) with about 150 companies that hire in India or remote, loaded idempotently at startup. Add a `validate-boards` command (for example `java -jar app.jar --validate-boards`, which runs without starting the web server). It calls each board and writes a report; drop invalid tokens. Target at least 120 valid boards.
 - **Scheduling:** v1 checks every enabled board on every tick. Adaptive intervals (busy boards every 3 minutes, quiet ones up to every 30 minutes) exist behind `ADAPTIVE_SCHEDULING=false`, for when there are thousands of boards.
 - **Copyright:** store a description only until it's tagged, never display full descriptions, and always link to the original posting.
 
@@ -293,17 +293,21 @@ Rules:
   - 403 (the user blocked the bot): mark the user `blocked`.
   - Other 4xx: mark `failed` and send to the DLQ.
   - 5xx and timeouts: retry with backoff.
-- **Message format:** HTML parse mode, escape all text, at most 4,096 characters:
+- **Message format:** HTML parse mode, escape all text, at most 4,096 characters. Quiet and plain: no emoji in the text, the title in bold, then short lines:
   ```
-  🐦 New match · 78/100
-  <b>Backend Engineer I</b> — ExampleCo
-  📍 Bengaluru · Hybrid · 0–2 yrs · found 2 min ago
-  ✅ You have: Java, Spring Boot, PostgreSQL
-  ➕ Missing: Kafka, Docker
+  <b>Backend Engineer I</b>
+  ExampleCo · Bengaluru · Hybrid
+
+  78% match · 0–2 yrs · 2 min ago
+  You have: Java, Spring Boot, PostgreSQL
+  To learn: Kafka, Docker
   ```
-- **Buttons:**
-  - Row 1: **Apply ↗** (the posting URL) and **Prep for this job ↗** (`PREP_LINK_TEMPLATE` filled in, URL-encoded; hidden if the template is empty).
-  - Row 2: **👍 Relevant** and **👎 Not relevant**.
+- **Company logo:** a 1200×600 card shown as a large link preview above the alert (`link_preview_options` with the card as `url`, `prefer_large_media`, `show_above_text`).
+  - Cards ship in the jar at `static/logos/<domain>.png` and are served from `PUBLIC_BASE_URL/logos/`. `domain` is a column on `boards`, set from the seed file.
+  - Each card shows the company's wordmark, or its icon with the name underneath, or the name alone. `scripts/logos/` regenerates them.
+  - A company without a card gets an alert with no preview. Every other message keeps link previews off.
+- *Changed on 2026-11-27 and 2026-11-29 (issue #10): after user feedback, the alert, the digest and all bot messages were redesigned to be easier to scan, and alerts gained the company's logo card. The earlier layout was five dense lines with emoji and comma lists.*
+- **Buttons:** one row with **Apply ↗** (the posting URL), **👍** and **👎**. If `PREP_LINK_TEMPLATE` is set, **Apply ↗** and **Prep ↗** (the template filled in, URL-encoded) take the first row, and 👍 / 👎 the second.
   - Callback data must fit in 64 bytes, for example `fb:r:{alertId in base62}`.
 - **Feedback:** stored on the alert and shown on `/stats` as "alert relevance."
 - **Digest:** at 20:00 IST, one message per user with up to 10 digest alerts from the last 24 hours (title, company, score, link), then mark them sent.

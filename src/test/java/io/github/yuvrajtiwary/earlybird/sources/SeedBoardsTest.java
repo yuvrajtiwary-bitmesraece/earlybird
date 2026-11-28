@@ -15,6 +15,8 @@ import org.junit.jupiter.api.Test;
 
 class SeedBoardsTest {
 
+    private static final String HEADER = "source,token,domain,company\n";
+
     private static List<SeedBoard> parse(String csv) throws Exception {
         return SeedBoards.parse(new StringReader(csv));
     }
@@ -23,29 +25,39 @@ class SeedBoardsTest {
     void parsesBoardsSkippingCommentsAndBlankLines() throws Exception {
         List<SeedBoard> boards = parse("""
                 # comment
-                source,token,company
+                source,token,domain,company
 
-                greenhouse,stripe,Stripe
-                lever,cred,CRED
-                ashby,notion,Notion, Inc.
+                greenhouse,stripe,stripe.com,Stripe
+                lever,cred,,CRED
+                ashby,notion,notion.com,Notion, Inc.
                 """);
 
         assertThat(boards).containsExactly(
-                new SeedBoard(Source.GREENHOUSE, "stripe", "Stripe"),
-                new SeedBoard(Source.LEVER, "cred", "CRED"),
-                new SeedBoard(Source.ASHBY, "notion", "Notion, Inc.")); // commas allowed in the last column
+                new SeedBoard(Source.GREENHOUSE, "stripe", "stripe.com", "Stripe"),
+                new SeedBoard(Source.LEVER, "cred", null, "CRED"), // the domain may be left empty
+                new SeedBoard(Source.ASHBY, "notion", "notion.com", "Notion, Inc.")); // commas allowed in the last column
     }
 
     @Test
     void rejectsBadLinesWithTheirLineNumber() {
-        assertThatThrownBy(() -> parse("greenhouse,stripe,Stripe\n")).hasMessageContaining("header");
-        assertThatThrownBy(() -> parse("source,token,company\nworkday,x,X\n"))
+        assertThatThrownBy(() -> parse("greenhouse,stripe,stripe.com,Stripe\n")).hasMessageContaining("header");
+        assertThatThrownBy(() -> parse("source,token,company\ngreenhouse,stripe,Stripe\n")).hasMessageContaining("header");
+        assertThatThrownBy(() -> parse(HEADER + "workday,x,x.com,X\n"))
                 .hasMessageContaining("line 2").hasMessageContaining("unknown source");
-        assertThatThrownBy(() -> parse("source,token,company\ngreenhouse,../etc,X\n")).hasMessageContaining("invalid token");
-        assertThatThrownBy(() -> parse("source,token,company\ngreenhouse,x,\n")).hasMessageContaining("company is empty");
-        assertThatThrownBy(() -> parse("source,token,company\ngreenhouse,x\n")).hasMessageContaining("line 2");
-        assertThatThrownBy(() -> parse("source,token,company\nlever,cred,A\nlever,CRED,B\n"))
+        assertThatThrownBy(() -> parse(HEADER + "greenhouse,../etc,x.com,X\n")).hasMessageContaining("invalid token");
+        assertThatThrownBy(() -> parse(HEADER + "greenhouse,x,x.com,\n")).hasMessageContaining("company is empty");
+        assertThatThrownBy(() -> parse(HEADER + "greenhouse,x,X\n")).hasMessageContaining("line 2");
+        assertThatThrownBy(() -> parse(HEADER + "lever,cred,a.com,A\nlever,CRED,b.com,B\n"))
                 .hasMessageContaining("duplicate");
+    }
+
+    /** The domain becomes part of a logo URL, so only a bare lower-case host name is accepted. */
+    @Test
+    void rejectsAnythingButABareDomain() {
+        for (String bad : List.of("https://x.com", "X.com", "x", "x.com/careers", "-x.com", "x..com", "x.com?a=b")) {
+            assertThatThrownBy(() -> parse(HEADER + "greenhouse,x," + bad + ",X\n"))
+                    .as(bad).hasMessageContaining("invalid domain");
+        }
     }
 
     /** The real seed list ships in the jar; this keeps it loadable and big enough. */
@@ -60,5 +72,7 @@ class SeedBoardsTest {
 
         assertThat(boards).hasSizeGreaterThanOrEqualTo(120);
         assertThat(bySource).containsOnlyKeys(Source.values());
+        // Every seed company has a website, so every alert can carry its logo (issue #10).
+        assertThat(boards).allSatisfy(b -> assertThat(b.domain()).as(b.company()).isNotNull());
     }
 }

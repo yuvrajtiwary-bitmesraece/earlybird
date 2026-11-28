@@ -86,17 +86,19 @@ public class AlertRepository {
     public record Delivery(
             Alert alert, long chatId, User.Status userStatus, int dailyCap, String title, String company, String url,
             String locationRaw, Instant firstSeenAt, Instant closedAt, List<String> cities, String workMode,
-            Double minYears, Double maxYears, List<String> jobSkills) {}
+            Double minYears, Double maxYears, List<String> jobSkills, String companyDomain) {}
 
     public Optional<Delivery> findDelivery(UUID alertId) {
         return jdbc.sql("""
                         select a.*, u.chat_id, u.status as user_status, coalesce(pr.daily_cap, 10) as cap,
                                p.title, p.company, p.url, p.location_raw, p.first_seen_at, p.closed_at,
-                               t.cities, t.work_mode, t.min_years, t.max_years, t.skills as job_skills
+                               t.cities, t.work_mode, t.min_years, t.max_years, t.skills as job_skills,
+                               b.domain as company_domain
                         from alerts a
                         join users u on u.id = a.user_id
                         left join profiles pr on pr.user_id = a.user_id
                         join postings p on p.id = a.posting_id
+                        left join boards b on b.id = p.board_id
                         left join posting_tags t on t.posting_id = a.posting_id
                         where a.id = :id
                         """)
@@ -106,7 +108,7 @@ public class AlertRepository {
                         rs.getString("title"), rs.getString("company"), rs.getString("url"), rs.getString("location_raw"),
                         Sql.instant(rs, "first_seen_at"), Sql.instant(rs, "closed_at"), Sql.list(rs, "cities"),
                         rs.getString("work_mode"), Sql.dbl(rs, "min_years"), Sql.dbl(rs, "max_years"),
-                        Sql.list(rs, "job_skills")))
+                        Sql.list(rs, "job_skills"), rs.getString("company_domain")))
                 .optional();
     }
 

@@ -6,6 +6,7 @@ import io.github.yuvrajtiwary.earlybird.persistence.AlertRepository.UserStats;
 import io.github.yuvrajtiwary.earlybird.persistence.Profile;
 import io.github.yuvrajtiwary.earlybird.persistence.RoleCategory;
 import io.github.yuvrajtiwary.earlybird.profiles.ResumeFacts;
+import io.github.yuvrajtiwary.earlybird.support.HtmlBalance;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -55,7 +56,7 @@ class TextsTest {
     void statsWithAndWithoutAlerts() {
         assertThat(Texts.stats(new UserStats(0, 0, 0, 0, 0, 0, null))).contains("No alerts yet");
         assertThat(Texts.stats(new UserStats(12, 9, 3, 11, 8, 2, "Kafka")))
-                .contains("12 (9 instant, 3 in digests)", "8 of 10 rated", "Kafka");
+                .contains("12 alerts: 9 instant, 3 in digests", "8 of 10 rated relevant", "Most-missed skill: Kafka");
     }
 
     @Test
@@ -63,5 +64,47 @@ class TextsTest {
         assertThat(Labels.experience(0)).isEqualTo("Student / fresher");
         assertThat(Labels.experience(1.3)).isEqualTo("1–2 years");
         assertThat(Labels.experience(9)).isEqualTo("2–3 years");
+    }
+
+    @Test
+    void onboardingStepsShowTheirProgress() {
+        assertThat(Texts.stepRoles())
+                .isEqualTo("<b>Roles</b> · step 1 of 5\nWhich kinds of roles do you want? Pick all that fit, then tap Done.");
+        assertThat(Texts.stepInternships()).startsWith("<b>Internships</b> · step 4 of 5");
+        assertThat(Texts.stepResume()).startsWith("<b>Resume</b> · step 5 of 5");
+    }
+
+    @Test
+    void longSkillListsAreShortenedOnTheProfileCardOnly() {
+        List<String> many = java.util.stream.IntStream.rangeClosed(1, 20).mapToObj(i -> "Skill" + i).toList();
+
+        assertThat(Texts.alertsOn(profile(many))).contains("Skill10 +10 more").doesNotContain("Skill11");
+        assertThat(Texts.skills(many)).contains("Skill20").doesNotContain("more");
+        assertThat(Texts.skillList(List.of("A", "B"), 1)).isEqualTo("A +1 more");
+    }
+
+    /** Telegram rejects a whole message over one unbalanced tag, so every text is checked, filled in fully. */
+    @Test
+    void everyMessageIsWellFormedHtmlWithinTelegramsLimit() {
+        var facts = new ResumeFacts(List.of("Java", "R&D"), 2.5, 2023, List.of());
+        List<String> all = new java.util.ArrayList<>(List.of(Texts.welcome("<b>Asha"), Texts.stepRoles(),
+                Texts.stepLocations(), Texts.stepExperience(), Texts.stepInternships(), Texts.stepResume(),
+                Texts.alertsOn(profile(List.of("C++"))), Texts.alertsOn(profile(List.of())), Texts.prefs(profile(List.of("Go"))),
+                Texts.editRoles(), Texts.editLocations(), Texts.editExperience(), Texts.editInternships(),
+                Texts.minScorePrompt(), Texts.dailyCapPrompt(), Texts.uploadPrompt(), Texts.resumeRead(facts, 0),
+                Texts.resumeRead(new ResumeFacts(List.of(), null, null, List.of()), 0), Texts.sameResume(profile(List.of("Go"))),
+                Texts.sameResume(profile(List.of())), Texts.uploadCancelled(), Texts.skills(List.of()), Texts.skills(List.of("<x>")),
+                Texts.stats(new UserStats(0, 0, 0, 0, 0, 0, null)), Texts.stats(new UserStats(1, 1, 0, 1, 1, 0, "K<8s>")),
+                Texts.help(), Texts.confirmDelete(), Texts.deleted(), Texts.keptEverything(), Texts.needStart(),
+                Texts.finishSetupFirst(), Texts.paused(), Texts.unpaused(), Texts.unknownCommand(), Texts.notACommand(),
+                Texts.sendPdfFirst(), Texts.slowDown()));
+        for (var reason : io.github.yuvrajtiwary.earlybird.profiles.ResumeAnalyzer.ResumeException.Reason.values()) {
+            all.add(Texts.resumeProblem(reason));
+        }
+
+        assertThat(all).allSatisfy(text -> {
+            assertThat(text.length()).isLessThanOrEqualTo(4096);
+            assertThat(HtmlBalance.unbalanced(text)).as(text).isEmpty();
+        });
     }
 }

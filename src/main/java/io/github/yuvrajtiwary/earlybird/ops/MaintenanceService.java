@@ -68,7 +68,7 @@ public class MaintenanceService {
             return 0;
         }
         var reports = new BoardValidator(jobSources).validate(
-                disabled.stream().map(b -> new SeedBoard(b.source(), b.token(), b.company())).toList());
+                disabled.stream().map(b -> new SeedBoard(b.source(), b.token(), null, b.company())).toList());
         int reEnabled = 0;
         for (int i = 0; i < disabled.size(); i++) {
             if (reports.get(i).status() == BoardValidator.Status.OK) {

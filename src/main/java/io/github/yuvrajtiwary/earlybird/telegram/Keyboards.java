@@ -52,7 +52,7 @@ final class Keyboards {
 
     static InlineKeyboardMarkup internships() {
         return new InlineKeyboardMarkup(List.of(List.of(
-                callback("Yes, include them", "i:y"), callback("No, full-time only", "i:n"))));
+                callback("Yes, include them", "i:y"), callback("Full-time only", "i:n"))));
     }
 
     static InlineKeyboardMarkup skipResume() {
@@ -88,7 +88,7 @@ final class Keyboards {
 
     static InlineKeyboardMarkup confirmDelete() {
         return new InlineKeyboardMarkup(List.of(List.of(
-                callback("Yes, delete everything", "del:yes"), callback("Cancel", "del:no"))));
+                callback("Delete everything", "del:yes"), callback("Keep my data", "del:no"))));
     }
 
     /** Every keyboard the bot can show; the callback-size test walks these. */

@@ -190,7 +190,7 @@ class Bot {
                     log.info("User {} deleted their data", user.id());
                     api.editMessageText(chatId, cq.message().messageId(), Texts.deleted(), null);
                 } else {
-                    api.editMessageText(chatId, cq.message().messageId(), "Kept everything.", null);
+                    api.editMessageText(chatId, cq.message().messageId(), Texts.keptEverything(), null);
                 }
                 return;
             }
