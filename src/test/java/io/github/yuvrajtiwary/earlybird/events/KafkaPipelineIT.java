@@ -73,7 +73,7 @@ class KafkaPipelineIT extends PipelineFixtures {
         Alert sent = awaitAlert(keen, postingId, Alert.Status.SENT);
         assertThat(sent.score()).isEqualTo(84);
         assertThat(messagesTo(keen)).singleElement()
-                .satisfies(m -> assertThat(m).contains("Strong match", "84/100", "Backend Engineer (Java)"));
+                .satisfies(m -> assertThat(m).contains("84% match", "Backend Engineer (Java)"));
         assertThat(enrichedPublished(postingId)).as("Kafka acknowledged PostingEnriched").isTrue();
     }
 

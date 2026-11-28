@@ -14,136 +14,125 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Alert and digest messages (spec 3.10, redesigned in issue #10), in Telegram HTML. Every piece of text that came
  * from a job board or a model is escaped; we never send a full job description, only a link to the original posting.
+ *
+ * <p>The style is deliberately quiet: no emoji in the text, the title in bold, then plain lines. The company's logo
+ * card (see {@link #logoUrl}) sits above the text and carries the visual weight.
  */
 public class AlertFormatter {
 
-    /** Logos come from Google's public favicon service: no key, and an unknown domain just gets no preview. */
-    static final String LOGO_URL = "https://www.google.com/s2/favicons?sz=128&domain=";
+    /**
+     * Bumped whenever the logo cards are regenerated: Telegram caches a link preview per URL, so a new query string
+     * is the only way to make it fetch the new picture.
+     */
+    static final String LOGO_VERSION = "1";
 
     private final String prepLinkTemplate;
+    private final String logoBaseUrl;
+    private final Set<String> logoDomains;
 
-    public AlertFormatter(String prepLinkTemplate) {
+    /**
+     * @param logoBaseUrl where the cards are served, e.g. {@code https://earlybird.onrender.com/logos/}
+     * @param logoDomains the domains that have a card; any other company's alert is sent without a picture
+     */
+    public AlertFormatter(String prepLinkTemplate, String logoBaseUrl, Set<String> logoDomains) {
         this.prepLinkTemplate = prepLinkTemplate == null ? "" : prepLinkTemplate.strip();
+        this.logoBaseUrl = logoBaseUrl;
+        this.logoDomains = Set.copyOf(logoDomains);
+    }
+
+    /** Without logos (tests, and local runs where Telegram couldn't reach the cards anyway). */
+    public AlertFormatter(String prepLinkTemplate) {
+        this(prepLinkTemplate, "", Set.of());
     }
 
     /**
-     * Laid out to be read at a glance on a phone: how good the match is, what the job is, where, then the skills
-     * in a quote block. The company's logo shows beside it as a small link preview ({@link #logoUrl}).
      * <pre>
-     * 🟢 Strong match
-     * ▰▰▰▰▰▰▰▰▱▱  78/100
-     *
      * Backend Engineer I
-     * 🏢 ExampleCo
+     * Stripe · Bengaluru · Hybrid
      *
-     * 📍 Bengaluru · Hybrid
-     * 🎓 0–2 yrs  ·  ⏱ found 2 min ago
-     *
-     * ┃ ✅ You have
-     * ┃ Java · Spring Boot · PostgreSQL
-     * ┃
-     * ┃ 📚 Worth learning
-     * ┃ Kafka · Docker
+     * 78% match · 0–2 yrs · 2 min ago
+     * You have: Java, Spring Boot, PostgreSQL
+     * To learn: Kafka, Docker
      * </pre>
      */
     public String alert(Delivery d, boolean recent, Instant now) {
         var a = d.alert();
         StringBuilder text = new StringBuilder()
-                .append(tierEmoji(a.score())).append(" <b>").append(tier(a.score())).append("</b>")
-                .append(recent ? " · <i>from the last 2 days</i>" : "").append('\n')
-                .append(bar(a.score())).append("  ").append(a.score()).append("/100\n\n")
                 .append("<b>").append(escape(d.title())).append("</b>\n")
-                .append("🏢 ").append(escape(d.company())).append("\n\n")
-                .append("📍 ").append(escape(place(d))).append('\n');
+                .append(escape(d.company())).append(" · ").append(escape(place(d))).append("\n\n");
+
+        List<String> facts = new ArrayList<>();
+        facts.add(a.score() + "% match");
         String years = years(d.minYears(), d.maxYears());
         if (years != null) {
-            text.append("🎓 ").append(years).append("  ·  ");
+            facts.add(years);
         }
-        text.append("⏱ found ").append(ago(d.firstSeenAt(), now));
+        facts.add(ago(d.firstSeenAt(), now));
+        text.append(String.join(" · ", facts));
 
-        List<String> skills = new ArrayList<>();
         if (!a.matchedSkills().isEmpty()) {
-            skills.add("✅ <b>You have</b>\n" + list(a.matchedSkills()));
+            text.append("\nYou have: ").append(escape(String.join(", ", a.matchedSkills())));
         }
         if (!a.missingSkills().isEmpty()) {
-            skills.add("📚 <b>Worth learning</b>\n" + list(a.missingSkills()));
+            text.append("\nTo learn: ").append(escape(String.join(", ", a.missingSkills())));
         }
         if (d.jobSkills().isEmpty()) {
-            skills.add("<i>The posting doesn't list specific skills.</i>");
+            text.append("\nThe posting doesn't list specific skills.");
         }
-        if (!skills.isEmpty()) {
-            text.append("\n\n<blockquote>").append(String.join("\n\n", skills)).append("</blockquote>");
+        if (recent) {
+            text.append("\n\n<i>A recent match from the last 2 days</i>");
         }
         return text.toString();
     }
 
-    /** The company's logo for the message's small link preview, or null to send without one. */
+    /** The company's logo card, shown above the alert, or null to send the alert without a picture. */
     public String logoUrl(Delivery d) {
-        return d.companyDomain() == null || d.companyDomain().isBlank() ? null : LOGO_URL + d.companyDomain();
+        String domain = d.companyDomain();
+        return domain == null || !logoDomains.contains(domain) ? null : logoBaseUrl + domain + ".png?v=" + LOGO_VERSION;
     }
 
-    static String tier(int score) {
-        return score >= 85 ? "Excellent match" : score >= 70 ? "Strong match" : "Good match";
-    }
-
-    static String tierEmoji(int score) {
-        return score >= 85 ? "🔥" : score >= 70 ? "🟢" : "🔵";
-    }
-
-    /** Ten cells, one per 10 points, rounded: 78 → ▰▰▰▰▰▰▰▰▱▱. */
-    static String bar(int score) {
-        int filled = Math.clamp(Math.round(score / 10f), 0, 10);
-        return "▰".repeat(filled) + "▱".repeat(10 - filled);
-    }
-
-    private static String list(List<String> skills) {
-        return escape(String.join(" · ", skills));
-    }
-
-    /** Row 1: Apply ↗ and, if configured, Prep ↗. Row 2: 👍 / 👎 feedback. */
+    /** One row: Apply ↗, 👍, 👎. With a prep link configured, Apply and Prep get their own row above the feedback. */
     public InlineKeyboardMarkup keyboard(Delivery d) {
-        List<InlineKeyboardButton> links = new ArrayList<>();
-        links.add(InlineKeyboardButton.link("Apply ↗", d.url()));
-        if (!prepLinkTemplate.isEmpty()) {
-            List<String> skills = d.jobSkills().size() > 6 ? d.jobSkills().subList(0, 6) : d.jobSkills();
-            links.add(InlineKeyboardButton.link("Prep for this job ↗", prepLinkTemplate
-                    .replace("{title}", encode(d.title()))
-                    .replace("{company}", encode(d.company()))
-                    .replace("{skills}", encode(String.join(",", skills)))));
-        }
         String id = Base62.encode(d.alert().id());
-        return new InlineKeyboardMarkup(List.of(links, List.of(
-                InlineKeyboardButton.callback("👍 Relevant", "fb:r:" + id),
-                InlineKeyboardButton.callback("👎 Not for me", "fb:n:" + id))));
+        InlineKeyboardButton apply = InlineKeyboardButton.link("Apply ↗", d.url());
+        InlineKeyboardButton relevant = InlineKeyboardButton.callback("👍", "fb:r:" + id);
+        InlineKeyboardButton notRelevant = InlineKeyboardButton.callback("👎", "fb:n:" + id);
+        if (prepLinkTemplate.isEmpty()) {
+            return new InlineKeyboardMarkup(List.of(List.of(apply, relevant, notRelevant)));
+        }
+        List<String> skills = d.jobSkills().size() > 6 ? d.jobSkills().subList(0, 6) : d.jobSkills();
+        InlineKeyboardButton prep = InlineKeyboardButton.link("Prep ↗", prepLinkTemplate
+                .replace("{title}", encode(d.title()))
+                .replace("{company}", encode(d.company()))
+                .replace("{skills}", encode(String.join(",", skills))));
+        return new InlineKeyboardMarkup(List.of(List.of(apply, prep), List.of(relevant, notRelevant)));
     }
 
     /**
      * The 20:00 digest: one message, best first, each title linking to the posting.
      * <pre>
-     * 🌙 Your evening digest
-     * 2 jobs from the last 24 hours, best first
+     * Your evening digest
+     * 2 jobs from today that scored just below your alert threshold.
      *
-     * 1. Backend Engineer
-     * 🏢 Acme  ·  🔵 62/100
+     * Data Engineer
+     * Databricks · 64% match
      * </pre>
      */
     public String digest(List<DigestItem> items) {
-        StringBuilder text = new StringBuilder("🌙 <b>Your evening digest</b>\n")
+        StringBuilder text = new StringBuilder("<b>Your evening digest</b>\n")
                 .append(items.size()).append(items.size() == 1 ? " job" : " jobs")
-                .append(" from the last 24 hours, best first\n");
-        int i = 1;
+                .append(" from today that scored just below your alert threshold.\n");
         for (DigestItem item : items) {
-            text.append("\n<b>").append(i++).append(".</b> <a href=\"").append(escape(item.url())).append("\">")
-                    .append(escape(item.title())).append("</a>\n")
-                    .append("🏢 ").append(escape(item.company())).append("  ·  ")
-                    .append(tierEmoji(item.score())).append(' ').append(item.score()).append("/100\n");
+            text.append("\n<b><a href=\"").append(escape(item.url())).append("\">").append(escape(item.title()))
+                    .append("</a></b>\n")
+                    .append(escape(item.company())).append(" · ").append(item.score()).append("% match\n");
         }
-        return text.append("\n<i>These scored below your instant-alert threshold, or came after your daily cap.</i>\n")
-                .append("⚙️ Change that with /prefs").toString();
+        return text.append("\n<i>Change your threshold with /prefs</i>").toString();
     }
 
     /** "Bengaluru · Hybrid": the cities we tagged (at most 3), else the board's own text, plus the work mode. */

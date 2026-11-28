@@ -43,7 +43,7 @@ class NotifierTest {
     private final TelegramApi telegram = mock(TelegramApi.class);
     private final DailyCaps caps = mock(DailyCaps.class);
     private final Notifier notifier = new Notifier(alerts, users, telegram, new TokenBucketRateLimiter(Clock.systemUTC()),
-            caps, new AlertFormatter(""), mock(EventBus.class), Clock.systemUTC(), new SimpleMeterRegistry(),
+            caps, new AlertFormatter("", "https://eb.example/logos/", java.util.Set.of("acme.com")), mock(EventBus.class), Clock.systemUTC(), new SimpleMeterRegistry(),
             List.of(Duration.ZERO));
 
     private final UUID id = Ids.newId();
@@ -68,7 +68,7 @@ class NotifierTest {
 
         assertThat(notifier.deliver(id, false)).isEqualTo(Alert.Status.SENT);
         verify(alerts).markSent(eq(id), any(), eq(555L));
-        verify(telegram).sendMessage(eq(42L), anyString(), any(), eq(AlertFormatter.LOGO_URL + "acme.com")); // issue #10
+        verify(telegram).sendMessage(eq(42L), anyString(), any(), eq("https://eb.example/logos/acme.com.png?v=1")); // issue #10
     }
 
     @Test
