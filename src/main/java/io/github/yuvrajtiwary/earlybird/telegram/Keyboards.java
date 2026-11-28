@@ -22,7 +22,7 @@ import java.util.List;
  */
 final class Keyboards {
 
-    static final String CHECK = "✅ ";
+    static final String CHECK = "✓ ";
 
     private Keyboards() {}
 
@@ -52,11 +52,11 @@ final class Keyboards {
 
     static InlineKeyboardMarkup internships() {
         return new InlineKeyboardMarkup(List.of(List.of(
-                callback("✅ Yes, include them", "i:y"), callback("Full-time only", "i:n"))));
+                callback("Yes, include them", "i:y"), callback("Full-time only", "i:n"))));
     }
 
     static InlineKeyboardMarkup skipResume() {
-        return new InlineKeyboardMarkup(List.of(List.of(callback("Skip for now ⏭", "cv:skip"))));
+        return new InlineKeyboardMarkup(List.of(List.of(callback("Skip for now", "cv:skip"))));
     }
 
     static InlineKeyboardMarkup cancelUpload() {
@@ -65,9 +65,9 @@ final class Keyboards {
 
     static InlineKeyboardMarkup prefsMenu() {
         return new InlineKeyboardMarkup(List.of(
-                List.of(callback("💼 Roles", "p:roles"), callback("📍 Locations", "p:locs")),
-                List.of(callback("🎓 Experience", "p:exp"), callback("🌱 Internships", "p:intern")),
-                List.of(callback("🎯 Alert threshold", "p:score"), callback("📬 Daily cap", "p:cap"))));
+                List.of(callback("Roles", "p:roles"), callback("Locations", "p:locs")),
+                List.of(callback("Experience", "p:exp"), callback("Internships", "p:intern")),
+                List.of(callback("Alert threshold", "p:score"), callback("Daily cap", "p:cap"))));
     }
 
     static InlineKeyboardMarkup minScore(int current) {
@@ -88,7 +88,7 @@ final class Keyboards {
 
     static InlineKeyboardMarkup confirmDelete() {
         return new InlineKeyboardMarkup(List.of(List.of(
-                callback("🗑 Yes, delete everything", "del:yes"), callback("Keep my data", "del:no"))));
+                callback("Delete everything", "del:yes"), callback("Keep my data", "del:no"))));
     }
 
     /** Every keyboard the bot can show; the callback-size test walks these. */

@@ -118,7 +118,7 @@ class BotIT {
         send(start); // Telegram re-delivers webhook updates it isn't sure we got
 
         await().during(Duration.ofMillis(700)).atMost(Duration.ofSeconds(10))
-                .until(() -> messagesTo(telegramUserId).stream().filter(m -> m.contains("Step 1 of 5")).count() == 1);
+                .until(() -> messagesTo(telegramUserId).stream().filter(m -> m.contains("step 1 of 5")).count() == 1);
     }
 
     @Test

@@ -290,9 +290,9 @@ class ProfileFlows {
         return profiles.find(user.id()).orElseThrow(() -> new IllegalStateException("onboarded user without profile"));
     }
 
-    /** The step, now answered: its headline, then "✅ <answer>", with the buttons removed. */
+    /** The step, now answered: its headline, then "✓ <answer>", with the buttons removed. */
     private static String done(String question, String answer) {
-        return question.split("\n")[0] + "\n✅ " + io.github.yuvrajtiwary.earlybird.common.Html.escape(answer);
+        return question.split("\n")[0] + "\n✓ " + io.github.yuvrajtiwary.earlybird.common.Html.escape(answer);
     }
 
     private static List<RoleCategory> roles(Draft d) {

@@ -29,7 +29,7 @@ class TextsTest {
         String text = Texts.alertsOn(profile(List.of("Java", "Spring Boot")));
 
         assertThat(text).contains("Alerts are on", "Backend, Full-stack", "Bengaluru, Remote (India)",
-                "Under 1 year", "included", "Java · Spring Boot");
+                "Under 1 year", "included", "Java, Spring Boot");
     }
 
     @Test
@@ -56,7 +56,7 @@ class TextsTest {
     void statsWithAndWithoutAlerts() {
         assertThat(Texts.stats(new UserStats(0, 0, 0, 0, 0, 0, null))).contains("No alerts yet");
         assertThat(Texts.stats(new UserStats(12, 9, 3, 11, 8, 2, "Kafka")))
-                .contains("12 alerts", "9 instant", "3 in digests", "▰▰▰▰▰▰▰▰▱▱  8 of 10 rated relevant", "Kafka");
+                .contains("12 alerts: 9 instant, 3 in digests", "8 of 10 rated relevant", "Most-missed skill: Kafka");
     }
 
     @Test
@@ -68,18 +68,19 @@ class TextsTest {
 
     @Test
     void onboardingStepsShowTheirProgress() {
-        assertThat(Texts.stepRoles()).startsWith("💼 <b>Step 1 of 5 · Roles</b>\n●○○○○\n");
-        assertThat(Texts.stepInternships()).contains("Step 4 of 5", "●●●●○");
-        assertThat(Texts.stepResume()).contains("●●●●●");
+        assertThat(Texts.stepRoles())
+                .isEqualTo("<b>Roles</b> · step 1 of 5\nWhich kinds of roles do you want? Pick all that fit, then tap Done.");
+        assertThat(Texts.stepInternships()).startsWith("<b>Internships</b> · step 4 of 5");
+        assertThat(Texts.stepResume()).startsWith("<b>Resume</b> · step 5 of 5");
     }
 
     @Test
     void longSkillListsAreShortenedOnTheProfileCardOnly() {
         List<String> many = java.util.stream.IntStream.rangeClosed(1, 20).mapToObj(i -> "Skill" + i).toList();
 
-        assertThat(Texts.alertsOn(profile(many))).contains("Skill12 <i>+8 more</i>").doesNotContain("Skill13");
+        assertThat(Texts.alertsOn(profile(many))).contains("Skill10 +10 more").doesNotContain("Skill11");
         assertThat(Texts.skills(many)).contains("Skill20").doesNotContain("more");
-        assertThat(Texts.skillList(List.of("A", "B"), 1)).isEqualTo("A <i>+1 more</i>");
+        assertThat(Texts.skillList(List.of("A", "B"), 1)).isEqualTo("A +1 more");
     }
 
     /** Telegram rejects a whole message over one unbalanced tag, so every text is checked, filled in fully. */
