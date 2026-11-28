@@ -94,8 +94,8 @@ If a setting is missing or wrong, startup stops with a list of every problem, ea
 - **Matching:** each tagged posting is compared with every active user who chose its role. A posting must pass three filters: location (a chosen city, with Delhi NCR and Mumbai treated as regions, or remote in India or worldwide), experience, and internships only if wanted.
   - Score (0–100) = 65 × share of the posting's main skills you have + 20 × experience fit + 15 × location fit.
   - Below 40: nothing. At or above your minimum (default 55): an instant alert. In between: the evening digest. Jobs found on a board's first check always go to the digest.
-- **Alerts:** a match tier (🔥 Excellent / 🟢 Strong / 🔵 Good) and score bar, then title, company, location and experience, with the skills you have and the ones worth learning in a quote block. **Apply**, optional **Prep**, and 👍 / 👎 buttons.
-  - **Company logo:** shown as a small preview beside the alert, from Google's public favicon service for the company's domain (the `domain` column in the seed list). No key is needed. A company without a logo gets a plain alert.
+- **Alerts:** a short, plain card: the title in bold, company and place, then match %, experience and age, with the skills you have and the ones to learn. **Apply** and 👍 / 👎 buttons (plus **Prep** if configured).
+  - **Company logo:** a sharp 1200×600 card (wordmark, or icon plus name) shown above each alert as a large link preview. Cards live in `src/main/resources/static/logos/` and are regenerated with [`scripts/logos/`](scripts/logos/README.md).
   - **No duplicates:** each alert is a row with a unique (user, posting) key, and it is claimed (`queued → sending`) before it is sent. A redelivered event or a re-run tick can't alert the same user twice about the same job.
   - **Limits:** a daily cap per user (default 10; past it, matches go to the digest), one message per second per chat, and 25 per second overall (Telegram's bulk limit is about 30).
   - **Failures:** Telegram 403 (the user blocked the bot) marks the user blocked; 429 and 5xx are retried.

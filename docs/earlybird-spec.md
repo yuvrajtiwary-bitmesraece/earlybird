@@ -293,28 +293,21 @@ Rules:
   - 403 (the user blocked the bot): mark the user `blocked`.
   - Other 4xx: mark `failed` and send to the DLQ.
   - 5xx and timeouts: retry with backoff.
-- **Message format:** HTML parse mode, escape all text, at most 4,096 characters. A tier header (🔥 Excellent match from 85, 🟢 Strong match from 70, 🔵 Good match below), a 10-cell score bar, then the title, company, place and experience, with the skills in a `<blockquote>`:
+- **Message format:** HTML parse mode, escape all text, at most 4,096 characters. Quiet and plain: no emoji in the text, the title in bold, then short lines:
   ```
-  🟢 Strong match
-  ▰▰▰▰▰▰▰▰▱▱  78/100
-
   <b>Backend Engineer I</b>
-  🏢 ExampleCo
+  ExampleCo · Bengaluru · Hybrid
 
-  📍 Bengaluru · Hybrid
-  🎓 0–2 yrs  ·  ⏱ found 2 min ago
-
-  ┃ ✅ You have
-  ┃ Java · Spring Boot · PostgreSQL
-  ┃
-  ┃ 📚 Worth learning
-  ┃ Kafka · Docker
+  78% match · 0–2 yrs · 2 min ago
+  You have: Java, Spring Boot, PostgreSQL
+  To learn: Kafka, Docker
   ```
-- **Company logo:** shown as a small link preview beside the alert (`link_preview_options` with the logo as `url`, `prefer_small_media`). The logo URL is Google's public favicon service for the board's `domain` (a column on `boards`, set from the seed file). With no domain, the alert is sent without a preview. Every other message keeps link previews off.
-- *Changed on 2026-11-27 (issue #10): the alert, the digest and all bot messages were redesigned to be easier to scan, and alerts gained the company logo. The earlier layout was five dense lines with comma lists.*
-- **Buttons:**
-  - Row 1: **Apply ↗** (the posting URL) and **Prep for this job ↗** (`PREP_LINK_TEMPLATE` filled in, URL-encoded; hidden if the template is empty).
-  - Row 2: **👍 Relevant** and **👎 Not for me**.
+- **Company logo:** a 1200×600 card shown as a large link preview above the alert (`link_preview_options` with the card as `url`, `prefer_large_media`, `show_above_text`).
+  - Cards ship in the jar at `static/logos/<domain>.png` and are served from `PUBLIC_BASE_URL/logos/`. `domain` is a column on `boards`, set from the seed file.
+  - Each card shows the company's wordmark, or its icon with the name underneath, or the name alone. `scripts/logos/` regenerates them.
+  - A company without a card gets an alert with no preview. Every other message keeps link previews off.
+- *Changed on 2026-11-27 and 2026-11-29 (issue #10): after user feedback, the alert, the digest and all bot messages were redesigned to be easier to scan, and alerts gained the company's logo card. The earlier layout was five dense lines with emoji and comma lists.*
+- **Buttons:** one row with **Apply ↗** (the posting URL), **👍** and **👎**. If `PREP_LINK_TEMPLATE` is set, **Apply ↗** and **Prep ↗** (the template filled in, URL-encoded) take the first row, and 👍 / 👎 the second.
   - Callback data must fit in 64 bytes, for example `fb:r:{alertId in base62}`.
 - **Feedback:** stored on the alert and shown on `/stats` as "alert relevance."
 - **Digest:** at 20:00 IST, one message per user with up to 10 digest alerts from the last 24 hours (title, company, score, link), then mark them sent.
